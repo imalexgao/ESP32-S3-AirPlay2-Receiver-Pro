@@ -851,8 +851,6 @@ static const struct {
     {48000, 16, 2}, /* 1: DVD */
     {44100, 24, 3}, /* 2: Hi-Res entry */
     {48000, 24, 3}, /* 3: studio default */
-    {96000, 24, 3}, /* 4: Hi-Res experimental */
-    {96000, 16, 2}, /* 5: experimental */
 };
 
 uint8_t settings_get_audio_fmt(void) {
@@ -881,10 +879,6 @@ const char *settings_audio_fmt_label(uint8_t fmt) {
     return "44.1k/24";
   case 3:
     return "48k/24";
-  case 4:
-    return "96k/24";
-  case 5:
-    return "96k/16";
   default:
     return "48k/24";
   }

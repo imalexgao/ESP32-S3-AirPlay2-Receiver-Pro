@@ -173,7 +173,7 @@ bool settings_remote_layout_locked(void);
 // ---- Audio output format (v1.1) ----
 
 /** Selectable output formats, index order is stable (persisted in NVS). */
-#define SETTINGS_AUDIO_FMT_COUNT    6
+#define SETTINGS_AUDIO_FMT_COUNT    4
 #define SETTINGS_AUDIO_FMT_DEFAULT  3 /* 48 kHz / 24-bit, matches Windows */
 
 /**
