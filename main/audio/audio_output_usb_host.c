@@ -1449,11 +1449,24 @@ static void setup_device(uint8_t addr) {
   s_setup_stage = 1;
   s_setup_err = 0;
   s_dev_addr = addr;
-  if (usb_host_device_open(s_client, addr, &s_dev) != ESP_OK) {
-    ESP_LOGE(TAG, "device_open(addr=%u) failed", addr);
+  /* v1.1.2: after a web-UI reprobe the stale handle's close is dispatched on
+   * the client event loop; opening the same address a few ms later can race
+   * that cleanup and fail with a generic error. Retry briefly — a real
+   * hot-plug has already finished enumeration, so this only ever waits for
+   * the stale close to drain. */
+  esp_err_t oerr = ESP_FAIL;
+  for (int attempt = 0; attempt < 5; attempt++) {
+    oerr = usb_host_device_open(s_client, addr, &s_dev);
+    if (oerr == ESP_OK)
+      break;
     s_dev = NULL;
+    vTaskDelay(pdMS_TO_TICKS(200));
+  }
+  if (oerr != ESP_OK) {
+    ESP_LOGE(TAG, "device_open(addr=%u) failed after retries: %s", addr,
+             esp_err_to_name(oerr));
     s_setup_stage = 1;
-    s_setup_err = -1; /* ESP_ERR_INVALID_RESPONSE is not applicable; generic */
+    s_setup_err = -1; /* generic: could not re-open after reprobe teardown */
     return;
   }
   s_setup_stage = 2;
