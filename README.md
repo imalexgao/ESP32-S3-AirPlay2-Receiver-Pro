@@ -1,6 +1,6 @@
 # ESP32-S3 AirPlay2 Receiver Pro — AirPlay 2 接收器固件（ESP32-S3 + USB 声卡）
 
-把一块 **ESP32-S3** 开发板变成 **AirPlay 2 接收器**：手机 / iPad / Mac 通过 AirPlay 投流，ESP32-S3 通过 **USB Host** 接口把 PCM 音频流给外接的 **USB 声卡（或自带 USB 解码的音箱）**，由音箱解码输出。
+把一块 **ESP32-S3** 开发板变成 **AirPlay 2 接收器**：手机 / iPad / Mac 通过 AirPlay 投流，ESP32-S3 通过 **USB Host** 接口把 PCM 音频流给外接的 **USB 声卡（或自带 USB 解码的音箱，例如作者使用的KEF EGG）**，由音箱解码输出。
 
 - 开机即开热点 **`esp32-airplay2_setup`**（无密码），手机连上后打开 **http://192.168.4.1** 完成配网
 - 完全汉化、深色近黑的 Web 配置后台
