@@ -90,7 +90,7 @@ KEF EGG FU3: bControlSize=1
 ### 7. 双版本发布
 
 - **通用版**：遥控布局后台可切换（默认苹果标准），热点 `esp32-airplay2_setup`——大多数用户推荐。
-- **KEF EGG 专版**：遥控布局写死 EGG 键位、热点 `esp32-airplay2`——EGG 用户开箱即用，无需进后台。
+- **KEF 有源音箱专版（带 USB 解码器）**：遥控布局写死为 KEF 遥控器键位（如 KEF EGG）、热点 `esp32-airplay2`——KEF 有源音箱（带 USB 解码器 + 原装遥控器）用户开箱即用，无需进后台。
 
 ### 8. 配网体验
 
@@ -144,7 +144,7 @@ pio device monitor
 | 版本 | 说明 | 适用 |
 |---|---|---|
 | **通用版** | 遥控布局可在后台切换（默认苹果标准），热点名 `esp32-airplay2_setup` | 大多数用户（推荐） |
-| **KEF EGG 专版** | 遥控布局写死为 KEF EGG 键位，热点名 `esp32-airplay2`，即"音量/切歌开箱即用"的最终调试版 | 使用 KEF EGG 遥控器、不想进后台配置的用户 |
+| **KEF 有源音箱专版（带 USB 解码器）** | 遥控布局写死为 KEF 遥控器键位（如 KEF EGG），热点名 `esp32-airplay2`，即"音量/切歌开箱即用"的最终调试版 | 使用 KEF 有源音箱（自带 USB 解码器、遥控器，如 KEF EGG）的用户，不想进后台配置 |
 
 - `ESP32-AirPlay2-通用版-firmware.bin` / `-spiffs.bin`
 - `ESP32-AirPlay2-KEF-EGG专版-firmware.bin` / `-spiffs.bin`
