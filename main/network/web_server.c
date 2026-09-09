@@ -872,6 +872,8 @@ static esp_err_t remote_layout_get_handler(httpd_req_t *req) {
     return ESP_FAIL;
   }
   cJSON_AddBoolToObject(json, "egg", settings_remote_layout_egg());
+  /* KEF 有源音箱专版把布局编译进固件：UI 隐藏选择器，POST 也一律强制 KEF。 */
+  cJSON_AddBoolToObject(json, "locked", settings_remote_layout_locked());
   cJSON_AddBoolToObject(json, "success", true);
   char *s = cJSON_PrintUnformatted(json);
   cJSON_Delete(json);
@@ -882,6 +884,24 @@ static esp_err_t remote_layout_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t remote_layout_post_handler(httpd_req_t *req) {
+#ifdef CONFIG_REMOTE_LAYOUT_KEF_EDITION
+  /* KEF 专版：布局锁死，任何请求都保持 KEF EGG。 */
+  (void)req;
+  cJSON *json = cJSON_CreateObject();
+  if (!json) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  cJSON_AddBoolToObject(json, "success", true);
+  cJSON_AddBoolToObject(json, "egg", true);
+  cJSON_AddBoolToObject(json, "locked", true);
+  char *s = cJSON_PrintUnformatted(json);
+  cJSON_Delete(json);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, s);
+  free(s);
+  return ESP_OK;
+#else
   char *content = recv_body(req, 128);
   if (!content) {
     httpd_resp_send_500(req);
@@ -913,7 +933,197 @@ static esp_err_t remote_layout_post_handler(httpd_req_t *req) {
   cJSON_Delete(json);
   cJSON_Delete(response);
   return ESP_OK;
+#endif
 }
+
+/* ── 输出格式 (v1.1)：采样率 x 位深 ─────────────────────────────────────── */
+static esp_err_t audio_format_get_handler(httpd_req_t *req) {
+  cJSON *json = cJSON_CreateObject();
+  if (!json) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  uint8_t fmt = settings_get_audio_fmt();
+  cJSON_AddBoolToObject(json, "success", true);
+  cJSON_AddNumberToObject(json, "fmt", fmt);
+  cJSON_AddNumberToObject(json, "count", SETTINGS_AUDIO_FMT_COUNT);
+  cJSON *opts = cJSON_AddArrayToObject(json, "options");
+  for (int i = 0; i < SETTINGS_AUDIO_FMT_COUNT; i++) {
+    uint32_t rate;
+    uint8_t bits;
+    settings_audio_fmt_params((uint8_t)i, &rate, &bits, NULL);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "fmt", i);
+    cJSON_AddNumberToObject(o, "rate", rate);
+    cJSON_AddNumberToObject(o, "bits", bits);
+    cJSON_AddStringToObject(o, "label", settings_audio_fmt_label((uint8_t)i));
+    cJSON_AddItemToArray(opts, o);
+  }
+  char *s = cJSON_PrintUnformatted(json);
+  cJSON_Delete(json);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, s);
+  free(s);
+  return ESP_OK;
+}
+
+static esp_err_t audio_format_post_handler(httpd_req_t *req) {
+  char *content = recv_body(req, 64);
+  if (!content) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  cJSON *json = cJSON_Parse(content);
+  free(content);
+  if (!json) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+    return ESP_FAIL;
+  }
+  cJSON *response = cJSON_CreateObject();
+  cJSON *val = cJSON_GetObjectItem(json, "fmt");
+  if (!val || !cJSON_IsNumber(val) || val->valueint < 0 ||
+      val->valueint >= SETTINGS_AUDIO_FMT_COUNT) {
+    cJSON_AddBoolToObject(response, "success", false);
+    cJSON_AddStringToObject(response, "error", "Invalid format index");
+  } else {
+    esp_err_t err = settings_set_audio_fmt((uint8_t)val->valueint);
+    cJSON_AddBoolToObject(response, "success", err == ESP_OK);
+    if (err != ESP_OK) {
+      cJSON_AddStringToObject(response, "error", esp_err_to_name(err));
+    }
+  }
+  char *json_str = cJSON_Print(response);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+  free(json_str);
+  cJSON_Delete(json);
+  cJSON_Delete(response);
+  return ESP_OK;
+}
+
+/* ── 界面语言 (v1.1)：中文 / English ───────────────────────────────────── */
+static esp_err_t ui_lang_get_handler(httpd_req_t *req) {
+  cJSON *json = cJSON_CreateObject();
+  if (!json) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  cJSON_AddBoolToObject(json, "success", true);
+  cJSON_AddNumberToObject(json, "lang", settings_get_ui_lang());
+  char *s = cJSON_PrintUnformatted(json);
+  cJSON_Delete(json);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, s);
+  free(s);
+  return ESP_OK;
+}
+
+static esp_err_t ui_lang_post_handler(httpd_req_t *req) {
+  char *content = recv_body(req, 64);
+  if (!content) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  cJSON *json = cJSON_Parse(content);
+  free(content);
+  if (!json) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+    return ESP_FAIL;
+  }
+  cJSON *response = cJSON_CreateObject();
+  cJSON *val = cJSON_GetObjectItem(json, "lang");
+  if (!val || !cJSON_IsNumber(val) || (val->valueint != 0 && val->valueint != 1)) {
+    cJSON_AddBoolToObject(response, "success", false);
+    cJSON_AddStringToObject(response, "error", "lang must be 0 (zh) or 1 (en)");
+  } else {
+    esp_err_t err = settings_set_ui_lang((uint8_t)val->valueint);
+    cJSON_AddBoolToObject(response, "success", err == ESP_OK);
+    if (err != ESP_OK) {
+      cJSON_AddStringToObject(response, "error", esp_err_to_name(err));
+    }
+  }
+  char *json_str = cJSON_Print(response);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+  free(json_str);
+  cJSON_Delete(json);
+  cJSON_Delete(response);
+  return ESP_OK;
+}
+
+/* ── 低延时模式 (v1.1)：180/60/20 ms 预滚 ───────────────────────────────── */
+static esp_err_t latency_get_handler(httpd_req_t *req) {
+  cJSON *json = cJSON_CreateObject();
+  if (!json) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  uint8_t mode = settings_get_latency_mode();
+  cJSON_AddBoolToObject(json, "success", true);
+  cJSON_AddNumberToObject(json, "mode", mode);
+  static const int k_preroll[3] = {180, 60, 20};
+  cJSON_AddNumberToObject(json, "preroll_ms",
+                          k_preroll[mode <= 2 ? mode : 0]);
+  char *s = cJSON_PrintUnformatted(json);
+  cJSON_Delete(json);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, s);
+  free(s);
+  return ESP_OK;
+}
+
+static esp_err_t latency_post_handler(httpd_req_t *req) {
+  char *content = recv_body(req, 64);
+  if (!content) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  cJSON *json = cJSON_Parse(content);
+  free(content);
+  if (!json) {
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+    return ESP_FAIL;
+  }
+  cJSON *response = cJSON_CreateObject();
+  cJSON *val = cJSON_GetObjectItem(json, "mode");
+  if (!val || !cJSON_IsNumber(val) || val->valueint < 0 || val->valueint > 2) {
+    cJSON_AddBoolToObject(response, "success", false);
+    cJSON_AddStringToObject(response, "error", "mode must be 0..2");
+  } else {
+    esp_err_t err = settings_set_latency_mode((uint8_t)val->valueint);
+    cJSON_AddBoolToObject(response, "success", err == ESP_OK);
+    if (err != ESP_OK) {
+      cJSON_AddStringToObject(response, "error", esp_err_to_name(err));
+    }
+  }
+  char *json_str = cJSON_Print(response);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_send(req, json_str, HTTPD_RESP_USE_STRLEN);
+  free(json_str);
+  cJSON_Delete(json);
+  cJSON_Delete(response);
+  return ESP_OK;
+}
+
+#ifdef CONFIG_AUDIO_OUTPUT_USB_HOST
+/* 重新应用当前输出格式：重新枚举 USB 声卡（无需拔插）。 */
+static esp_err_t usb_reprobe_handler(httpd_req_t *req) {
+  cJSON *json = cJSON_CreateObject();
+  if (!json) {
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+  bool ok = audio_output_usb_host_reprobe();
+  cJSON_AddBoolToObject(json, "success", true);
+  cJSON_AddBoolToObject(json, "reprobed", ok);
+  char *s = cJSON_PrintUnformatted(json);
+  cJSON_Delete(json);
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_sendstr(req, s);
+  free(s);
+  return ESP_OK;
+}
+#endif
 
 static esp_err_t ota_update_handler(httpd_req_t *req) {
   if (req->content_len == 0) {
@@ -1029,6 +1239,13 @@ static esp_err_t system_info_handler(httpd_req_t *req) {
   }
   const esp_app_desc_t *app_desc = esp_app_get_description();
   cJSON_AddStringToObject(info, "firmware_version", app_desc->version);
+  cJSON_AddBoolToObject(info, "kef_edition",
+#ifdef CONFIG_REMOTE_LAYOUT_KEF_EDITION
+                        true
+#else
+                        false
+#endif
+  );
   cJSON_AddStringToObject(info, "reset_reason",
                           reset_reason_str(esp_reset_reason()));
   cJSON_AddNumberToObject(info, "uptime_s",
@@ -1213,6 +1430,14 @@ static esp_err_t usb_audio_status_handler(httpd_req_t *req) {
   }
   cJSON_AddNumberToObject(json, "setup_stage", st.setup_stage);
   cJSON_AddNumberToObject(json, "setup_err", st.setup_err);
+  /* v1.1: the receiver-side pre-roll (180/60/20 ms) currently in effect. */
+  {
+    uint8_t mode = settings_get_latency_mode();
+    static const int k_preroll[3] = {180, 60, 20};
+    cJSON_AddNumberToObject(json, "latency_mode", mode);
+    cJSON_AddNumberToObject(json, "preroll_ms",
+                            k_preroll[mode <= 2 ? mode : 0]);
+  }
   if (attached) {
     cJSON_AddNumberToObject(json, "sample_rate", st.sample_rate);
     cJSON_AddNumberToObject(json, "rate_readback", st.rate_readback);
@@ -2443,6 +2668,10 @@ esp_err_t web_server_start(uint16_t port) {
   config.max_uri_handlers += 2; // /api/audio/usb + /api/desc (diagnostics)
 #endif
   config.max_uri_handlers += 2; // /api/remote/layout get/post
+  config.max_uri_handlers += 6; // /api/audio/format + /api/ui/lang + /api/audio/latency (get/post each)
+#ifdef CONFIG_AUDIO_OUTPUT_USB_HOST
+  config.max_uri_handlers += 1; // /api/usb/reprobe
+#endif
 #ifdef DAC_HAS_SUB_OFFSET
   config.max_uri_handlers += 2; // sub level get/post
 #endif
@@ -2597,6 +2826,40 @@ esp_err_t web_server_start(uint16_t port) {
                                         .method = HTTP_POST,
                                         .handler = remote_layout_post_handler};
   httpd_register_uri_handler(s_server, &remote_layout_post_uri);
+
+  httpd_uri_t audio_format_get_uri = {.uri = "/api/audio/format",
+                                      .method = HTTP_GET,
+                                      .handler = audio_format_get_handler};
+  httpd_register_uri_handler(s_server, &audio_format_get_uri);
+  httpd_uri_t audio_format_post_uri = {.uri = "/api/audio/format",
+                                       .method = HTTP_POST,
+                                       .handler = audio_format_post_handler};
+  httpd_register_uri_handler(s_server, &audio_format_post_uri);
+
+  httpd_uri_t ui_lang_get_uri = {.uri = "/api/ui/lang",
+                                 .method = HTTP_GET,
+                                 .handler = ui_lang_get_handler};
+  httpd_register_uri_handler(s_server, &ui_lang_get_uri);
+  httpd_uri_t ui_lang_post_uri = {.uri = "/api/ui/lang",
+                                  .method = HTTP_POST,
+                                  .handler = ui_lang_post_handler};
+  httpd_register_uri_handler(s_server, &ui_lang_post_uri);
+
+  httpd_uri_t latency_get_uri = {.uri = "/api/audio/latency",
+                                 .method = HTTP_GET,
+                                 .handler = latency_get_handler};
+  httpd_register_uri_handler(s_server, &latency_get_uri);
+  httpd_uri_t latency_post_uri = {.uri = "/api/audio/latency",
+                                  .method = HTTP_POST,
+                                  .handler = latency_post_handler};
+  httpd_register_uri_handler(s_server, &latency_post_uri);
+
+#ifdef CONFIG_AUDIO_OUTPUT_USB_HOST
+  httpd_uri_t usb_reprobe_uri = {.uri = "/api/usb/reprobe",
+                                 .method = HTTP_POST,
+                                 .handler = usb_reprobe_handler};
+  httpd_register_uri_handler(s_server, &usb_reprobe_uri);
+#endif
 
   httpd_uri_t ota_uri = {.uri = "/api/ota/update",
                          .method = HTTP_POST,

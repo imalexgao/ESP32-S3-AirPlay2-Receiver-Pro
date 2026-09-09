@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "settings.h"
 
 static const char *TAG = "audio_v2";
 
@@ -107,8 +108,19 @@ void audio_engine_v2_set_format(audio_engine_v2_t *engine,
     return;
   }
   engine->format = *format;
+  /* Pre-roll = the amount of decoded audio buffered before playback starts.
+   * v1.0 hardcoded 180 ms; v1.1 makes it user-selectable (normal / low /
+   * ultra) because it is the receiver-side component of both the startup
+   * delay and the during-playback latency. 180 ms tolerates WiFi jitter;
+   * 60/20 ms feel snappier but underrun more easily on a congested link. */
+  static const uint32_t k_preroll_ms[3] = {180U, 60U, 20U};
+  uint32_t ms = 180U;
+  uint8_t mode = settings_get_latency_mode();
+  if (mode < 3U) {
+    ms = k_preroll_ms[mode];
+  }
   engine->scheduler.preroll_samples =
-      (uint32_t)((uint64_t)format->sample_rate * 180U / 1000U);
+      (uint32_t)((uint64_t)format->sample_rate * ms / 1000U);
 }
 
 bool audio_engine_v2_set_frame_samples(audio_engine_v2_t *engine,

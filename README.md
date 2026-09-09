@@ -3,9 +3,10 @@
 把一块 **ESP32-S3** 开发板变成 **AirPlay 2 接收器**：手机 / iPad / Mac 通过 AirPlay 投流，ESP32-S3 通过 **USB Host** 接口把 PCM 音频流给外接的 **USB 声卡（或自带 USB 解码的音箱，例如作者使用的KEF EGG）**，由音箱解码输出。
 
 - 开机即开热点 **`esp32-airplay2_setup`**（无密码），手机连上后打开 **http://192.168.4.1** 完成配网
-- 完全汉化、深色近黑的 Web 配置后台
+- 完全汉化（可选 English）、深色近黑的 Web 配置后台
 - 手机 AirPlay 音量与设备音量**独立控制**（设备音量可作最大音量上限）
 - 支持 AirPlay 2（默认）与 AirPlay 1 兼容模式（遥控切歌需要 v1）
+- **v1.1**：输出格式选择（44.1/48/96 kHz × 16/24 bit，Windows 式音质档位）、后台中/英语言切换、低延时模式（180/60/20 ms）
 
 ---
 
@@ -36,7 +37,10 @@
 | 实时音频状态 | ✗ | ✓ 「音频编码状态」卡片（设备/UAC/采样率/位深/峰值/音量） |
 | 遥控器音量键 | 布局错位 | ✓ 实测修正（±2dB，与后台滑块联动） |
 | 播放/暂停/上一首/下一首 | ✗ | ✓ DACP 传输键（AirPlay v1 模式） |
-| 遥控布局适配 | 写死单一布局 | ✓ 后台可切换 苹果标准 / KEF EGG |
+| 遥控布局适配 | 写死单一布局 | ✓ 后台可切换 苹果标准 / KEF EGG（专版锁 KEF） |
+| 输出格式选择 | 固定 44.1 kHz | ✓ v1.1 六档（44.1/48/96 kHz × 16/24 bit，Windows 式音质档位） |
+| 后台语言 | 仅英文 | ✓ v1.1 中文 / English 可切换 |
+| 低延时模式 | ✗ | ✓ v1.1 三档（180/60/20 ms 预滚） |
 | 声卡诊断 | ✗ | ✓ `/api/desc` 完整描述符 + 声道级音量回读 |
 | 预编译固件 | 单一 | ✓ 通用版 + KEF EGG 专版双版本 |
 | 热点配网 | 英文名 | ✓ `esp32-airplay2_setup` + captive portal |
@@ -90,13 +94,45 @@ KEF EGG FU3: bControlSize=1
 ### 7. 双版本发布
 
 - **通用版**：遥控布局后台可切换（默认苹果标准），热点 `esp32-airplay2_setup`——大多数用户推荐。
-- **KEF 有源音箱专版（带 USB 解码器）**：遥控布局写死为 KEF 遥控器键位（如 KEF EGG）、热点 `esp32-airplay2`——KEF 有源音箱（带 USB 解码器 + 原装遥控器）用户开箱即用，无需进后台。
+- **KEF 有源音箱专版（带 USB 解码器）**：遥控布局编译期写死为 KEF 遥控器键位（如 KEF EGG），后台不显示布局选择器；其余功能（格式选择 / 语言 / 低延时）与通用版完全一致。KEF 有源音箱（带 USB 解码器 + 原装遥控器）用户开箱即用。
 
 ### 8. 配网体验
 
 - 上电自动开热点 `esp32-airplay2_setup`（无密码），手机连上自动弹配置页（captive portal）。
 - 连上家里 WiFi 后热点自动关闭；WiFi 失联自动重新开热点，方便再次配网。
 - 支持热点改名、密码、开关（后台可配置）。
+
+### 9. v1.1：输出格式选择（Windows 式音质档位）
+
+像 Windows 声音设置一样，后台可自由选择采样率 × 位深：
+
+| 档位 | 采样率 | 位深 | 标注 |
+|---|---|---|---|
+| 0 | 44.1 kHz | 16 bit | CD 音质 |
+| 1 | 48 kHz | 16 bit | DVD 音质 |
+| 2 | 44.1 kHz | 24 bit | Hi-Res 入门 |
+| 3 | 48 kHz | 24 bit | Hi-Res 标准（录音室音质，默认，与 Windows 默认一致） |
+| 4 | 96 kHz | 24 bit | Hi-Res 高解析（实验性，USB 带宽满负荷） |
+| 5 | 96 kHz | 16 bit | 实验性（高采样低精度，不推荐） |
+
+- 声卡不支持所选组合时自动回退到最近支持项并提示。
+- 点"重新应用格式"即时生效（通过 USB 热重载重新协商，免拔插、免重启）。
+- ⚠️ 44.1 kHz 在部分声卡（如 KEF EGG）上实测音量偏小、拉音量条可能致异常关机——遇到请保持 48 kHz。
+
+### 10. v1.1：后台语言切换
+
+- 后台顶栏 中文 / EN 一键切换，全部界面文案 i18n，选择持久化（NVS），立即生效。
+
+### 11. v1.1：低延时模式
+
+| 模式 | 起播预滚缓冲 | 适用场景 |
+|---|---|---|
+| 普通（默认） | ~180 ms | 稳定优先，抗 WiFi 抖动 |
+| 低延时 | ~60 ms | 声画同步、切歌后快速出声 |
+| 极速 | ~20 ms | 追求最低延时，WiFi 环境要好 |
+
+- 后台实时显示当前预滚值；切换后下一次会话生效。
+- 端到端延时构成与"1 ms"的真相见下方「延时说明」。
 
 ---
 
@@ -120,20 +156,24 @@ KEF EGG FU3: bControlSize=1
 环境：PlatformIO（ESP-IDF 框架）。
 
 ```bash
-# 构建（环境：esp32s3-usbhost）
-pio run
+# 构建（通用版）
+pio run -e esp32s3-usbhost
+
+# 构建（KEF 有源音箱专版：遥控布局锁死 KEF 键位）
+pio run -e esp32s3-usbhost-kef
 
 # 烧录固件 + SPIFFS 网页（用 UART 口连接开发板）
-pio run -t upload
-pio run -t uploadfs
+pio run -e esp32s3-usbhost -t upload
+pio run -e esp32s3-usbhost -t uploadfs
 
 # 串口日志（115200）
 pio device monitor
 ```
 
 构建产物：
-- `.pio\build\esp32s3-usbhost\firmware.bin` —— 应用固件（OTA 升级用这个）
+- `.pio\build\esp32s3-usbhost\firmware.bin` —— 通用版应用固件（OTA 升级用这个）
 - `.pio\build\esp32s3-usbhost\spiffs.bin` —— 网页资源
+- `.pio\build\esp32s3-usbhost-kef\firmware.bin` / `spiffs.bin` —— KEF 专版
 
 > 网页 OTA 只上传 `firmware.bin`；首次烧录或网页内容更新后，需用 `pio run -t uploadfs` 把 SPIFFS 一起写入。
 
@@ -144,10 +184,10 @@ pio device monitor
 | 版本 | 说明 | 适用 |
 |---|---|---|
 | **通用版** | 遥控布局可在后台切换（默认苹果标准），热点名 `esp32-airplay2_setup` | 大多数用户（推荐） |
-| **KEF 有源音箱专版（带 USB 解码器）** | 遥控布局写死为 KEF 遥控器键位（如 KEF EGG），热点名 `esp32-airplay2`，即"音量/切歌开箱即用"的最终调试版 | 使用 KEF 有源音箱（自带 USB 解码器、遥控器，如 KEF EGG）的用户，不想进后台配置 |
+| **KEF 有源音箱专版（带 USB 解码器）** | 遥控布局编译期写死为 KEF 遥控器键位（如 KEF EGG），后台无布局选择器；其余功能与通用版一致 | 使用 KEF 有源音箱（自带 USB 解码器、遥控器，如 KEF EGG）的用户，不想进后台配置遥控 |
 
 - `ESP32-AirPlay2-通用版-firmware.bin` / `-spiffs.bin`
-- `ESP32-AirPlay2-KEF-EGG专版-firmware.bin` / `-spiffs.bin`
+- `ESP32-AirPlay2-KEF有源音箱专版-firmware.bin` / `-spiffs.bin`
 - `bootloader.bin` / `partitions.bin`（首次烧录用）
 
 首次烧录（全量）：
@@ -191,8 +231,8 @@ EGG 的 master 通道只有 MUTE，音量增益在 ch1(L)/ch2(R)。固件已做�
 - 音量键两种模式都可用（本地设备音量）
 - **切换模式后手机可能连不上 / 连上无声**：手机端缓存了旧服务（`_airplay` v2 / `_raop` v1），多试几次或手机端断开重连、忘掉设备即可恢复
 
-### ④ 采样率
-- 默认 48 kHz 输出（源 44.1 kHz 自动重采样）
+### ④ 采样率 / 输出格式
+- 默认 48 kHz / 24-bit 输出（源 44.1 kHz 自动重采样）；v1.1 起后台可自由选择 44.1/48/96 kHz × 16/24 bit（见「v1.1：输出格式选择」）
 - 部分声卡在 44.1 kHz 下异常（EGG 实测小声 + 拉音量条可能关机），如遇此类问题请保持 48 kHz
 
 ### ⑤ 电源
@@ -204,13 +244,18 @@ EGG 的 master 通道只有 MUTE，音量增益在 ch1(L)/ch2(R)。固件已做�
 
 ```
 main/               AirPlay 2 协议栈 + 应用逻辑（rtsp/ hap/ plist/ dacp/ audio/ network/）
-  audio/audio_output_usb_host.c    USB Host 音频输出后端（UAC1/2 等时流 + 音量/遥控）
+  audio/audio_output_usb_host.c    USB Host 音频输出后端（UAC1/2 等时流 + 音量/遥控/格式协商）
   network/wifi.c                   AP+STA、热点配网、断线自动恢复
-  network/web_server.c             Web API（含 /api/audio/usb、/api/desc、/api/remote/layout）
-data/www/           SPIFFS 网页（index.html）
+  network/web_server.c             Web API（含 /api/audio/usb、/api/desc、/api/remote/layout、/api/audio/format、/api/audio/latency、/api/ui/lang、/api/usb/reprobe）
+  settings.c                       NVS 设置（音量/遥控布局/输出格式/语言/延时模式）
+data/www/           SPIFFS 网页（index.html，中英双语）
 components/         板级支持
 config/             sdkconfig 分层配置
 ```
+
+## 版本历史
+
+见 [CHANGELOG.md](CHANGELOG.md)。v1.0：音量根治 + 解耦 + 遥控器全功能 + 双版本；v1.1：输出格式选择 + 中英双语 + 低延时模式 + KEF 专版同步升级。
 
 ---
 
@@ -243,8 +288,8 @@ USB 等时输出（1 ms/帧）       ~1–3 ms
 ### 能做到多低？
 
 - **端到端 1 ms 物理上不可能**：2.4 GHz WiFi 包抖动本身就大于 1 ms，USB 全速帧就是 1 ms，iOS 编码侧还有几十 ms。任何 AirPlay 接收器（包括 Apple 自家 HomePod）都做不到端到端 1 ms。
-- **可以优化**：v1.1 计划提供"低延时模式"（调小播放缓冲），目标端到端 **~120–150 ms**，代价是 WiFi 波动时更易出现卡顿/爆音。默认关闭，稳定优先。
-- 我们**不做**"1ms"这种无法兑现的宣传，但可以在后台增加与发送端的时钟偏移显示（真正的同步质量指标），把能证明的指标公开。
+- **可以优化**：v1.1 已提供**低延时模式**（普通 180 ms / 低延时 60 ms / 极速 20 ms 三档预滚缓冲，后台可切），目标端到端 **~120–150 ms**，代价是 WiFi 波动时更易出现卡顿/爆音。默认普通档，稳定优先。
+- 我们**不做**"1ms"这种无法兑现的宣传，但可以公开后台的实时缓冲 / 预滚值（真正可验证的指标）。
 
 ---
 
@@ -252,7 +297,8 @@ USB 等时输出（1 ms/帧）       ~1–3 ms
 
 - **没声音？** 先看后台「音频编码状态」是否显示已连接；再看日志中 `audio_uac_host` 的 Streaming 信息。若显示 `No stereo PCM iso OUT alt-setting found`，说明声卡不是标准 UAC 输出设备。
 - **声音小？** 确认固件为三通道音量写入版本；用 `GET /api/audio/usb` 看 `fu_ch1_db/fu_ch2_db` 是否为 0 dB。若为负值说明声卡增益在声道上。
-- **遥控键位错乱？** 后台「遥控布局」切换苹果标准 / KEF EGG。
+- **遥控键位错乱？** 通用版：后台「遥控布局」切换苹果标准 / KEF EGG；KEF 专版已锁死 KEF 键位。
+- **想换输出格式？** 后台「音频输出」选择 44.1/48/96 kHz × 16/24 bit，点"重新应用格式"即时生效；44.1 kHz 在部分声卡上异常（见兼容边界④）。
 - **切歌 / 播放暂停无效？** 切到 AirPlay v1 模式。
 - **热点连不上？** 确认烧录的是 `esp32s3-usbhost` 环境；连上家里 WiFi 后热点自动关闭属正常设计。
 - **AirPlay 列表里看不到设备？** 确认手机与开发板同一 WiFi，设备名 / mDNS 正常（默认 `ESP32-AirPlay2`）。

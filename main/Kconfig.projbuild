@@ -1,6 +1,17 @@
 menu "Airplay ESP Configuration"
     # Board configuration is now in components/boards/Kconfig.projbuild
-    
+
+    config REMOTE_LAYOUT_KEF_EDITION
+        bool "KEF powered-speaker edition: lock the remote layout to KEF EGG"
+        default n
+        help
+            Builds the "KEF 有源音箱（带 USB 解码器）专版". The HID remote
+            layout is compiled to the KEF EGG mapping and the web UI hides
+            the remote-layout selector; every other v1.1 feature (output
+            format selection, UI language, low-latency mode) stays available.
+            The universal build keeps the user-selectable Apple-standard /
+            KEF EGG layout.
+
     menu "LED Configuration"
         config LED_STATUS_BRIGHTNESS
             int "Status LED brightness (0-100% duty for the on phase)"

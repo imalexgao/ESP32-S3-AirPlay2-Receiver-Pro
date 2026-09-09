@@ -137,8 +137,12 @@
  * (~1 audible partial pop per 2.5 s); at >=147 ms the underruns stop
  * (verified: gap=0, underruns frozen over multi-minute 48 k runs). The
  * depth is self-reported per-rate through
- * audio_output_get_hardware_latency_us(), so A/V sync is unaffected. */
-#define FIFO_TARGET_BYTES ((OUTPUT_RATE / 1000) * 4 * 160)
+ * audio_output_get_hardware_latency_us(), so A/V sync is unaffected.
+ * v1.1: the stream buffer is ALLOCATED for the largest selectable format
+ * (96 kHz / 24-bit stereo = 576 B/ms x 160 ms), while the FILL level is
+ * capped per-rate at s_fifo_target (~160 ms at the negotiated rate), so a
+ * 48 kHz session holds 160 ms of audio, not 320 ms. */
+#define FIFO_TARGET_BYTES ((96U * 6U) * 160U)
 
 /* ── USB / streaming state (owned by the USB client task) ────────────────── */
 static usb_host_client_handle_t s_client = NULL;
@@ -193,6 +197,20 @@ static int s_out_subslot =
 static uint32_t s_out_rate =
     OUTPUT_RATE;              /* rate the chosen alt actually runs */
 static uint8_t s_uac_ver = 0; /* UAC spec major version: 1 or 2 */
+
+/* ── User-chosen output format (v1.1) ───────────────────────────────────────
+ * The web UI picks one of six rate x bits combinations. Resolved once per
+ * setup_device() from settings, it drives the alt/rate preference below
+ * (OUTPUT_RATE / 24-bit remain only as the compile-time fallback). */
+static uint32_t s_chosen_rate = OUTPUT_RATE;
+static uint8_t s_chosen_subslot = 3; /* 24-bit, matches Windows default */
+
+static void resolve_chosen_format(void) {
+  uint8_t fmt = settings_get_audio_fmt();
+  settings_audio_fmt_params(fmt, &s_chosen_rate, NULL, &s_chosen_subslot);
+  ESP_LOGI(TAG, "User format: %s (rate=%lu subslot=%u)", settings_audio_fmt_label(fmt),
+           (unsigned long)s_chosen_rate, (unsigned)s_chosen_subslot);
+}
 
 /* All iso PCM altsettings found in the config descriptor — the web UI's
  * "可用格式" menu (which formats the attached card actually offers). */
@@ -264,6 +282,7 @@ static SemaphoreHandle_t s_ctrl_sem =
 static volatile bool s_connect_pending = false;
 static volatile bool s_disconnect_pending = false;
 static volatile uint8_t s_pending_addr = 0;
+static uint8_t s_dev_addr = 0; /* USB address of the attached card (reprobe) */
 
 /* ── PCM queue ─────────────────────────────────────────────────────────────
  * A FreeRTOS stream buffer gives event-driven backpressure: the playback task
@@ -282,6 +301,11 @@ static volatile uint32_t s_push_bytes = 0;
  * only caller of fifo_reset(); other tasks (connect/teardown, AirPlay flush)
  * request the reset through this flag instead of touching the FIFO. */
 static volatile bool flush_requested = false;
+
+/* Per-rate FIFO fill target (~160 ms at the negotiated rate x subslot).
+ * The stream buffer itself is allocated at FIFO_TARGET_BYTES (the largest
+ * format); this cap keeps the playout depth at ~160 ms on slower formats. */
+static size_t s_fifo_target = FIFO_TARGET_BYTES;
 
 /* fifo_reset() <-> iso-callback handshake: while s_fifo_hold is set the
  * callback emits silence without touching the stream buffer, and
@@ -325,7 +349,7 @@ static void fifo_prefill_silence(void) {
   if (!s_pcm)
     return;
   static const uint8_t zeros[512] = {0};
-  size_t space = xStreamBufferSpacesAvailable(s_pcm);
+  size_t space = s_fifo_target; /* prefill to the per-rate target, not capacity */
   while (space >= sizeof(zeros)) {
     xStreamBufferSend(s_pcm, zeros, sizeof(zeros), 0);
     space -= sizeof(zeros);
@@ -346,9 +370,23 @@ static void fifo_push(const uint8_t *src, size_t len) {
     return;
   s_push_bytes += len;
   size_t sent = 0;
-  for (int tries = 0; sent < len && tries < 5 && s_streaming; tries++)
+  for (int tries = 0; sent < len && tries < 8 && s_streaming; tries++) {
+    /* Cap the fill level at the per-rate target: the buffer is allocated for
+     * the largest format, and letting it fill to capacity at a slower rate
+     * would more than double the playout depth. Sleep instead of a blocking
+     * send when the target is reached — the iso drain wakes this loop. */
+    size_t level = fifo_level();
+    if (level >= s_fifo_target) {
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
+    }
+    size_t chunk = len - sent;
+    size_t room = s_fifo_target - level;
+    if (chunk > room)
+      chunk = room;
     sent +=
-        xStreamBufferSend(s_pcm, src + sent, len - sent, pdMS_TO_TICKS(100));
+        xStreamBufferSend(s_pcm, src + sent, chunk, pdMS_TO_TICKS(100));
+  }
   if (sent < len) {
     size_t mis = sent % (size_t)s_frame_bytes;
     if (mis) {
@@ -540,9 +578,10 @@ static bool find_speaker_altsetting(const usb_config_desc_t *cfg) {
             if (nfreq == 0 && len >= 14) { /* continuous range */
               uint32_t lo = p[8] | (p[9] << 8) | ((uint32_t)p[10] << 16);
               uint32_t hi = p[11] | (p[12] << 8) | ((uint32_t)p[13] << 16);
-              as_rate = (OUTPUT_RATE >= lo && OUTPUT_RATE <= hi) ? OUTPUT_RATE
-                        : (44100 >= lo && 44100 <= hi) ? 44100
-                        : (48000 >= lo && 48000 <= hi) ? 48000 : lo;
+              as_rate = (s_chosen_rate >= lo && s_chosen_rate <= hi)
+                            ? s_chosen_rate
+                            : (44100 >= lo && 44100 <= hi) ? 44100
+                            : (48000 >= lo && 48000 <= hi) ? 48000 : lo;
               as_rates[0] = lo;
               as_rates[1] = hi;
               as_rates_n = 2; /* range hint for the web menu */
@@ -553,14 +592,14 @@ static bool find_speaker_altsetting(const usb_config_desc_t *cfg) {
                 uint32_t r = p[8 + 3 * f] | (p[9 + 3 * f] << 8) |
                              ((uint32_t)p[10 + 3 * f] << 16);
                 as_rates[as_rates_n++] = r;
-                /* Prefer the configured OUTPUT_RATE when the device lists it.
+                /* Prefer the USER-CHOSEN rate when the device lists it.
                  * A UAC1 device (e.g. KEF EGG) may list 44.1/48/96 k in ONE
                  * alt; always picking 44.1 k kept it on the quiet/glitchy
                  * path. First listed remains the fallback. Do NOT assume a
-                 * device accepts OUTPUT_RATE just because SET_CUR succeeds —
-                 * 48 k-only dongles (Sony INZONE Buds) ACK 44100, so 44.1 k is
-                 * never forced on a device that only lists 48 k. */
-                if (r == OUTPUT_RATE)
+                 * device accepts the chosen rate just because SET_CUR
+                 * succeeds — 48 k-only dongles (Sony INZONE Buds) ACK 44100,
+                 * so a rate a device never lists is never forced. */
+                if (r == s_chosen_rate)
                   as_rate = r;
               }
               if (as_rate == 0)
@@ -613,16 +652,16 @@ static bool find_speaker_altsetting(const usb_config_desc_t *cfg) {
                    as_subslot <= 4) {
           /* Stereo PCM iso OUT = the speaker path. Rank, high to low: an alt
            * whose packets can carry its rate beats one that can't (an
-           * undersized EP would underrun); then native OUTPUT_RATE — a UAC1
+           * undersized EP would underrun); then the USER-CHOSEN rate — a UAC1
            * device may expose 48 k and 44.1 k as separate sibling alts, and
            * the sinc resampler costs far more CPU than a subslot expand;
-           * then 24-bit (subslot 3) over 16-bit (subslot 2) — matches the
+           * then the USER-CHOSEN bit depth (24-bit by default) — matches the
            * KEF EGG's loud Windows path (alt2, 24-bit@48k). */
           uint32_t alt_rate = as_rate ? as_rate : OUTPUT_RATE;
           unsigned need = (unsigned)(alt_rate / 1000 + (alt_rate % 1000 != 0)) *
                           2u * (unsigned)as_subslot; /* peak bytes per 1 ms */
-          int rank = (mps >= need ? 4 : 0) + (alt_rate == OUTPUT_RATE ? 2 : 0) +
-                     (as_subslot == 3 ? 1 : 0);
+          int rank = (mps >= need ? 4 : 0) + (alt_rate == s_chosen_rate ? 2 : 0) +
+                     (as_subslot == s_chosen_subslot ? 1 : 0);
           if (rank > best_rank) {
             s_out_iface = (uint8_t)iface;
             s_out_alt = (uint8_t)alt;
@@ -719,7 +758,8 @@ static void out_xfer_cb(usb_transfer_t *xfer) {
              "ur=%lu rx=%lu gap=%lu",
              (unsigned long)s_xfer_done, (unsigned long)s_xfer_err,
              (unsigned long)s_pkt_err, (unsigned long)s_push_bytes,
-             fifo_level(), FIFO_TARGET_BYTES, (unsigned long)s_underruns,
+             fifo_level(), (unsigned long)s_fifo_target,
+             (unsigned long)s_underruns,
              (unsigned long)rx_d, (unsigned long)gap_d);
   }
 
@@ -738,6 +778,11 @@ static esp_err_t start_streaming(void) {
   s_pkt_base = (int)(s_out_rate / 1000);
   s_pkt_frac = (int)(s_out_rate % 1000);
   s_frac_accum = 0;
+  /* v1.1: the fill target follows the negotiated format (~160 ms). */
+  s_fifo_target =
+      (size_t)s_frame_bytes * (size_t)(s_out_rate / 1000) * 160U;
+  if (s_fifo_target > FIFO_TARGET_BYTES)
+    s_fifo_target = FIFO_TARGET_BYTES;
   int alloc = (s_pkt_base + 1) * s_frame_bytes * PACKETS_PER_URB;
   if (alloc > (int)s_out_mps * PACKETS_PER_URB)
     alloc = (int)s_out_mps * PACKETS_PER_URB;
@@ -974,7 +1019,7 @@ static uint32_t uac2_clock_pick_rate(void) {
   if (n > (got - 2) / 12)
     n = (got - 2) / 12; /* device sent fewer subranges than it claimed */
   uint32_t first_min = 0;
-  bool has_44100 = false, has_48000 = false;
+  bool has_chosen = false, has_44100 = false, has_48000 = false;
   for (int i = 0; i < n; i++) {
     const uint8_t *r = buf + 2 + i * 12;
     uint32_t mn =
@@ -985,11 +1030,18 @@ static uint32_t uac2_clock_pick_rate(void) {
         r[8] | (r[9] << 8) | ((uint32_t)r[10] << 16) | ((uint32_t)r[11] << 24);
     if (i == 0)
       first_min = mn;
+    if (s_chosen_rate >= mn && s_chosen_rate <= mx &&
+        (res == 0 || (s_chosen_rate - mn) % res == 0))
+      has_chosen = true;
     if (44100 >= mn && 44100 <= mx && (res == 0 || (44100 - mn) % res == 0))
       has_44100 = true;
     if (48000 >= mn && 48000 <= mx && (res == 0 || (48000 - mn) % res == 0))
       has_48000 = true;
   }
+  /* The user-chosen rate wins when the clock lists it; otherwise fall back
+   * 44.1 k native > 48 k resampled > first advertised. */
+  if (has_chosen)
+    return s_chosen_rate;
   if (has_44100)
     return 44100;
   if (has_48000)
@@ -1396,6 +1448,7 @@ static void read_product_string(void) {
 static void setup_device(uint8_t addr) {
   s_setup_stage = 1;
   s_setup_err = 0;
+  s_dev_addr = addr;
   if (usb_host_device_open(s_client, addr, &s_dev) != ESP_OK) {
     ESP_LOGE(TAG, "device_open(addr=%u) failed", addr);
     s_dev = NULL;
@@ -1405,6 +1458,9 @@ static void setup_device(uint8_t addr) {
   }
   s_setup_stage = 2;
   read_product_string();
+  /* v1.1: resolve the user-chosen rate x bits before parsing the descriptor —
+   * the alt/rate preference below (and the UAC2 clock pick) both follow it. */
+  resolve_chosen_format();
   const usb_config_desc_t *cfg = NULL;
   if (usb_host_get_active_config_descriptor(s_dev, &cfg) != ESP_OK || !cfg) {
     ESP_LOGE(TAG, "get_active_config_descriptor failed");
@@ -2183,7 +2239,7 @@ uint32_t audio_output_get_hardware_latency_us(void) {
    * those pulled-ahead frames as "early" and emits silence, the receive buffer
    * backs up and ages, and stale frames then drop as "late" — the oscillation
    * heard as stutter. Reporting the true depth makes them release on time. */
-  uint32_t fifo_us = (uint32_t)((uint64_t)FIFO_TARGET_BYTES * 1000000ULL /
+  uint32_t fifo_us = (uint32_t)((uint64_t)s_fifo_target * 1000000ULL /
                                 (s_out_rate * (uint32_t)s_frame_bytes));
   uint32_t urb_us = (uint32_t)NUM_URBS * PACKETS_PER_URB * 1000;
   return fifo_us + urb_us;
@@ -2205,7 +2261,7 @@ bool audio_output_get_usb_audio_status(usb_audio_status_t *st) {
   st->streaming = s_streaming;
   st->underruns = s_underruns;
   st->fifo_bytes = (uint32_t)fifo_level();
-  st->fifo_cap = (uint32_t)FIFO_TARGET_BYTES;
+  st->fifo_cap = (uint32_t)s_fifo_target;
   st->hid_active = s_hid_active;
   st->hid_events = s_hid_events;
   st->hid_volup = s_hid_volup;
@@ -2228,4 +2284,23 @@ bool audio_output_get_usb_audio_status(usb_audio_status_t *st) {
   st->setup_stage = (int)s_setup_stage;
   st->setup_err = (int)s_setup_err;
   return st->attached;
+}
+
+/* v1.1: re-enumerate the attached card with the current user-chosen format.
+ * Tears the device down and re-latches the NEW_DEV path, so the setup task
+ * re-runs setup_device() (fresh descriptor parse + alt pick + sampling rate)
+ * — a format change applies without unplugging or rebooting. Returns false
+ * if no card is attached to re-enumerate. */
+bool audio_output_usb_host_reprobe(void) {
+  if (!s_dev) {
+    return false;
+  }
+  uint8_t addr = s_dev_addr;
+  teardown_device();
+  /* The setup task acts on the latch once s_dev is free (teardown above runs
+   * in the same iteration), exactly like a hot re-plug. */
+  s_pending_addr = addr;
+  s_connect_pending = true;
+  ESP_LOGI(TAG, "Reprobe requested: re-enumerating device addr=%u", addr);
+  return true;
 }

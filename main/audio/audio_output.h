@@ -244,6 +244,14 @@ int audio_output_get_alt_info(usb_alt_info_t *out, int max);
 bool audio_output_get_usb_audio_status(usb_audio_status_t *st);
 
 /**
+ * Re-enumerate the attached sound card with the current user-chosen output
+ * format (rate x bits) — applies a web format change without unplugging or
+ * rebooting. No-op when no card is attached.
+ * @return true if a re-enumeration was requested.
+ */
+bool audio_output_usb_host_reprobe(void);
+
+/**
  * Set the independent DEVICE volume (dB, -30..0) applied at the USB output
  * stage on top of the AirPlay/source volume. This is the volume the web
  * slider controls — it is NOT linked to the phone's volume. When a USB sound

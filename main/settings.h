@@ -163,6 +163,70 @@ bool settings_remote_layout_egg(void);
  */
 esp_err_t settings_set_remote_layout_egg(bool egg);
 
+/**
+ * True in the KEF 有源音箱 edition: the remote layout is compiled into the
+ * KEF EGG mapping and the web UI must hide the layout selector (any POST is
+ * forced to KEF).
+ */
+bool settings_remote_layout_locked(void);
+
+// ---- Audio output format (v1.1) ----
+
+/** Selectable output formats, index order is stable (persisted in NVS). */
+#define SETTINGS_AUDIO_FMT_COUNT    6
+#define SETTINGS_AUDIO_FMT_DEFAULT  3 /* 48 kHz / 24-bit, matches Windows */
+
+/**
+ * Get the user-chosen output format index (0..5).
+ */
+uint8_t settings_get_audio_fmt(void);
+
+/**
+ * Resolve a format index into rate / bits / subslot (2=16-bit, 3=24-bit).
+ * Out-of-range indexes fall back to the default format.
+ */
+void settings_audio_fmt_params(uint8_t fmt, uint32_t *rate, uint8_t *bits,
+                               uint8_t *subslot);
+
+/**
+ * Short label of a format index, e.g. "48k/24".
+ */
+const char *settings_audio_fmt_label(uint8_t fmt);
+
+/**
+ * Save the output format index. Takes effect at the next USB re-enumeration
+ * (device replug or the web "重新应用" button).
+ */
+esp_err_t settings_set_audio_fmt(uint8_t fmt);
+
+// ---- Web UI language (v1.1) ----
+
+/**
+ * Get the UI language: 0 = 中文 (default), 1 = English.
+ */
+uint8_t settings_get_ui_lang(void);
+
+/**
+ * Save the UI language. Applies immediately (the page reloads).
+ */
+esp_err_t settings_set_ui_lang(uint8_t lang);
+
+// ---- Low-latency mode (v1.1) ----
+
+#define SETTINGS_LATENCY_NORMAL 0 /* 180 ms pre-roll (v1.0 behavior) */
+#define SETTINGS_LATENCY_LOW    1 /* 60 ms */
+#define SETTINGS_LATENCY_ULTRA  2 /* 20 ms */
+
+/**
+ * Get the low-latency mode (0 normal / 1 low / 2 ultra).
+ */
+uint8_t settings_get_latency_mode(void);
+
+/**
+ * Save the low-latency mode. Applies at the next AirPlay session start.
+ */
+esp_err_t settings_set_latency_mode(uint8_t mode);
+
 // ---- LED settings ----
 
 /**
