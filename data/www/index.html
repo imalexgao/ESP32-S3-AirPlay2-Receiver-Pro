@@ -96,8 +96,7 @@ a.btn{text-decoration:none;text-align:center}
 <div class='form-group'><label for='audio-fmt' data-i18n='audio_fmt'>输出格式</label>
 <select id='audio-fmt' onchange='saveFormat()'></select></div>
 <div class='hint' id='fmt-hint'></div>
-<div class='actions'><button class='btn btn-secondary' onclick='reprobeUsb()' data-i18n='fmt_apply'>重新应用格式</button></div>
-<div class='hint' data-i18n='fmt_note'>切换后点击"重新应用格式"立即生效；不支持的组合自动回退到声卡实际支持的最近格式。</div>
+<div class='hint' data-i18n='fmt_note'>切换格式后需重启开发板生效；不支持的组合会自动回退到声卡实际支持的最近格式。</div>
 <div id='fmt-msg'></div>
 <div class='form-group' style='margin-top:18px'><label for='latency-mode' data-i18n='latency_title'>延时模式</label>
 <select id='latency-mode' onchange='saveLatency()'>
@@ -207,8 +206,8 @@ zh:{
  vol_title:'音量控制', vol_hint:'设备音量：数字增益（100% = 满幅直通，与电脑音量 100% 同级别；向下为衰减，不削波），与手机音量相互独立、互不联动；遥控器按键调节会同步显示到此处',
  vol_applied:'设备音量已应用（{db} dB）', vol_fail:'保存失败', vol_save_err:'出错：{e}',
  audio_out_title:'音频输出', audio_fmt:'输出格式', fmt_apply:'重新应用格式',
- fmt_note:'切换后点击"重新应用格式"立即生效；不支持的组合自动回退到声卡实际支持的最近格式。',
- fmt_saved:'格式已保存，点击"重新应用格式"生效。', fmt_reprobed:'已重新枚举声卡，格式已应用。',
+ fmt_note:'切换格式后需重启开发板生效；不支持的组合会自动回退到声卡实际支持的最近格式。',
+ fmt_saved:'格式已保存，重启后生效。', fmt_reprobed:'已重新枚举声卡，格式已应用。',
  fmt_no_card:'未检测到声卡，无需重新应用（已保存，插卡时生效）。', fmt_err:'格式保存失败',
  latency_title:'延时模式', latency_normal:'普通（180ms 预滚 · 稳定优先）',
  latency_low:'低延时（60ms · 更跟手）', latency_ultra:'极速（20ms · 声画同步优先）',
@@ -259,8 +258,8 @@ en:{
  vol_title:'Volume Control', vol_hint:'Device volume: digital gain (100% = full-scale passthrough, same level as 100% on a PC; lower values attenuate, never clip). It is independent of the phone volume; the remote control volume keys are shown here too.',
  vol_applied:'Device volume applied ({db} dB)', vol_fail:'Save failed', vol_save_err:'Error: {e}',
  audio_out_title:'Audio Output', audio_fmt:'Output format', fmt_apply:'Apply format',
- fmt_note:'Click "Apply format" after switching — takes effect immediately. Unsupported combinations automatically fall back to the nearest format the card supports.',
- fmt_saved:'Format saved. Click "Apply format" to apply it.', fmt_reprobed:'Sound card re-enumerated, format applied.',
+ fmt_note:'Reboot the board after switching — the new format takes effect on boot. Unsupported combinations automatically fall back to the nearest format the card supports.',
+ fmt_saved:'Format saved. It will take effect after reboot.', fmt_reprobed:'Sound card re-enumerated, format applied.',
  fmt_no_card:'No card attached — nothing to re-apply (saved; takes effect when plugged).', fmt_err:'Failed to save format',
  latency_title:'Latency Mode', latency_normal:'Normal (180ms pre-roll · stability first)',
  latency_low:'Low latency (60ms · snappier)', latency_ultra:'Ultra (20ms · A/V sync first)',
@@ -453,11 +452,6 @@ async function saveFormat(){
     else{msg('fmt-msg',d.error||T('err'),'err');}}
   catch(e){msg('fmt-msg',T('err'),'err');}
   refreshFmtHint();}
-async function reprobeUsb(){
-  try{var r=await fetch('/api/usb/reprobe',{method:'POST'});var d=await r.json();
-    msg('fmt-msg',d&&d.reprobed?T('fmt_reprobed'):T('fmt_no_card'),
-        d&&d.reprobed?'ok':'info');}
-  catch(e){msg('fmt-msg',T('err'),'err');}}
 async function loadLatency(){
   try{var r=await fetch('/api/audio/latency');var d=await r.json();
     if(d.success){document.getElementById('latency-mode').value=String(d.mode);}}
