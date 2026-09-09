@@ -1,0 +1,370 @@
+<!DOCTYPE html><html><head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>ESP32-AirPlay2</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,system-ui,sans-serif;background:linear-gradient(160deg,#0a0c0f 0%,#11141a 55%,#0d1014 100%);min-height:100vh;padding:20px;color:#e8eaed}
+.wrap{max-width:480px;margin:0 auto}
+.header{text-align:center;padding:30px 0}
+.header h1{font-size:28px;font-weight:600;margin-bottom:8px;color:#f2f4f7}
+.header p{color:#98a2b3;font-size:14px}
+.status-bar{background:#1a2230;border:1px solid #26303f;border-radius:12px;padding:16px;margin-bottom:20px;text-align:center}
+.status-bar.ok{background:#12331f;border-color:#2f7a4f}
+.status-bar.err{background:#3a1618;border-color:#8c3a3d}
+.card{background:#161a21;border:1px solid #262c36;border-radius:14px;padding:20px;margin-bottom:16px}
+.card h2{font-size:16px;font-weight:600;margin-bottom:16px;color:#8ab4f8}
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:12px;color:#98a2b3;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px}
+input[type=text],input[type=password],select{width:100%;padding:12px 14px;background:#0e1116;border:1px solid #2b323d;border-radius:8px;color:#e8eaed;font-size:14px}
+input:focus,select:focus{outline:none;border-color:#5b8cff}
+.btn{display:inline-block;padding:12px 20px;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;transition:all 0.2s}
+.btn-primary{background:#5b8cff;color:#fff}
+.btn-primary:hover{background:#4a79f0}
+.btn-secondary{background:rgba(255,255,255,0.08);color:#e8eaed;border:1px solid rgba(255,255,255,0.12)}
+.btn-secondary:hover{background:rgba(255,255,255,0.14)}
+.btn-danger{background:#d64545;color:#fff}
+.btn-danger:hover{background:#c23a3a}
+.btn-block{width:100%;margin-top:10px}
+.btn:disabled{opacity:0.5;cursor:not-allowed}
+a.btn{text-decoration:none;text-align:center}
+.wifi-list{max-height:180px;overflow-y:auto;margin:12px 0;border-radius:8px}
+.wifi-item{padding:12px;background:#0e1116;margin-bottom:4px;border-radius:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+.wifi-item:hover{background:rgba(91,140,255,0.15)}
+.wifi-item.sel{background:rgba(91,140,255,0.22);border:1px solid #5b8cff}
+.wifi-item .ssid{font-weight:500}
+.wifi-item .rssi{font-size:12px;color:#98a2b3}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.info-item{background:#0e1116;padding:12px;border-radius:8px}
+.info-item label{font-size:11px;color:#98a2b3;display:block;margin-bottom:4px}
+.info-item span{font-size:14px;font-weight:500}
+.msg{padding:10px;border-radius:6px;margin-top:10px;font-size:13px}
+.msg.ok{background:rgba(47,122,79,0.35);color:#a9e3c2}
+.msg.err{background:rgba(140,58,61,0.4);color:#f2b8ba}
+.msg.info{background:rgba(42,74,120,0.4);color:#b9d6f5}
+.file-row{display:flex;gap:10px;align-items:center}
+.file-name{flex:1;font-size:13px;color:#98a2b3}
+.actions{display:flex;gap:10px;margin-top:10px}
+.slider-row{display:flex;align-items:center;gap:12px}
+.slider-row input[type=range]{flex:1;accent-color:#5b8cff}
+.slider-row span{font-size:13px;color:#98a2b3;min-width:42px;text-align:right}
+</style></head><body>
+<div class='wrap'>
+<div class='header'><h1>ESP32-AirPlay2</h1><p>AirPlay 2 接收器 · ESP32-S3 → USB 声卡</p></div>
+<div id='status-bar' class='status-bar'>正在加载…</div>
+<div class='card'><h2>WiFi 网络</h2>
+<button class='btn btn-secondary' onclick='scanWiFi()'>扫描网络</button>
+<div id='wifi-list' class='wifi-list'></div>
+<div class='form-group'><label>网络名称 (SSID)</label><input type='text' id='wifi-ssid' placeholder='请输入或选择网络'></div>
+<div class='form-group'><label>密码</label><input type='password' id='wifi-pass' placeholder='请输入密码'></div>
+<button class='btn btn-primary btn-block' onclick='saveWiFi()'>连接 WiFi</button>
+<div id='wifi-msg'></div></div>
+<div class='card'><h2>音频编码状态 <span style='font-size:11px;color:#888;font-weight:400'>USB 声卡编码信息</span></h2>
+<div id='usb-status-bar' class='msg info' style='margin-top:0'>未检测到 USB 声卡，请插入 USB 端口。</div>
+<div id='usb-grid' class='info-grid' style='display:none;margin-top:12px'>
+<div class='info-item'><label>设备</label><span id='usb-product'>-</span></div>
+<div class='info-item'><label>USB 音频类</label><span id='usb-uac'>-</span></div>
+<div class='info-item'><label>采样率</label><span id='usb-rate'>-</span></div>
+<div class='info-item'><label>位深</label><span id='usb-bits'>-</span></div>
+<div class='info-item'><label>声道</label><span id='usb-ch'>-</span></div>
+<div class='info-item'><label>流状态</label><span id='usb-state'>-</span></div>
+<div class='info-item'><label>运行时长</label><span id='usb-uptime'>-</span></div>
+<div class='info-item'><label>输出电平 (峰值)</label><span id='usb-peak'>-</span></div>
+<div class='info-item'><label>AirPlay 音量</label><span id='usb-ap-vol'>-</span></div>
+<div class='info-item'><label>设备音量</label><span id='usb-dev-vol'>-</span></div>
+</div></div>
+<div class='card'><h2>音量控制</h2>
+<div class='slider-row'><input type='range' id='volume-slider' min='0' max='100' value='50'
+ oninput='document.getElementById("vol-pct").textContent=this.value+"%"' onchange='saveVolume()'>
+<span id='vol-pct'>50%</span></div>
+<div style='font-size:12px;color:#98a2b3;margin-top:8px'>设备音量：数字增益（100% = 满幅直通，与电脑音量 100% 同级别；向下为衰减，不削波），与手机音量相互独立、互不联动；遥控器按键调节会同步显示到此处</div>
+<div id='volume-msg'></div></div>
+<div class='card'><h2>设备设置</h2>
+<div class='form-group'><label>AirPlay 设备名称</label><input type='text' id='dev-name' placeholder='我的音箱'></div>
+<button class='btn btn-primary' onclick='saveName()'>保存名称</button>
+<div id='name-msg'></div>
+<div class='form-group' style='margin-top:18px'><label for='airplay-mode'>AirPlay 模式</label>
+<select id='airplay-mode' onchange='saveAirplayMode()'>
+<option value='0'>多房间 (v2)</option>
+<option value='1'>兼容旧版 (v1)</option>
+</select></div>
+<div style='font-size:12px;opacity:0.7;margin-top:-8px;margin-bottom:6px'>部分软件仅支持 AirPlay v1。苹果设备仍可在此模式下工作，但没有 v2 特性（如多音箱同步）。<br>音量 / 切歌硬件按键需要 v1 模式。</div>
+<div id='airplay-msg'></div>
+<div class='form-group' style='margin-top:18px'><label for='remote-layout'>遥控布局</label>
+<select id='remote-layout' onchange='saveRemoteLayout()'>
+<option value='0'>苹果标准（默认）</option>
+<option value='1'>KEF EGG</option>
+</select></div>
+<div style='font-size:12px;opacity:0.7;margin-top:-8px;margin-bottom:6px'>苹果标准：byte[1] 播放=0x01 / 音量+=0x02 / 音量-=0x04。KEF EGG：音量+=0x01 / 音量-=0x02，byte[2] 播放/上下首。两布局比特位互斥，选错会键位错乱。改动立即生效。</div>
+<div id='remote-layout-msg'></div>
+<div class='form-group' style='margin-top:18px'><label for='led-brightness'>LED 亮度</label>
+<div class='slider-row'><input type='range' id='led-brightness' min='0' max='255' value='128' oninput='document.getElementById("led-pct").textContent=Math.round(this.value/255*100)+"%"'>
+<span id='led-pct'>50%</span></div></div>
+<button class='btn btn-secondary' onclick='saveBrightness()'>保存亮度</button>
+<div id='brightness-msg'></div>
+<div id='chan-group'>
+<div class='form-group' style='margin-top:18px'><label for='chan-mode' id='chan-label'>输出声道</label>
+<select id='chan-mode' onchange='saveChannel()'>
+<option value='0'>立体声</option>
+<option value='1'>仅左声道</option>
+<option value='2'>仅右声道</option>
+<option value='3'>单声道 (L+R)</option>
+</select></div>
+<div id='chan-msg'></div></div>
+<div id='dual-group' style='display:none;margin-top:18px'>
+<div class='form-group'><label for='dual-mode'>第二功放</label>
+<select id='dual-mode' onchange='saveDual()'>
+<option value='1'>桥接单声道 (PBTL)</option>
+<option value='0'>立体声 (BTL)</option>
+</select></div>
+<div id='dual-msg'></div></div>
+<div id='eq-link' style='display:none;margin-top:18px'>
+<a href='/bq' class='btn btn-secondary'>参数均衡器 (Biquad EQ)</a></div>
+<div id='hf1-link' style='display:none;margin-top:18px'>
+<a href='/hf' class='btn btn-secondary'>HybridFlow 调音</a></div>
+</div>
+<div class='card'><h2>固件升级</h2>
+<div class='file-row'><input type='file' id='fw-file' accept='.bin' style='display:none'>
+<button class='btn btn-secondary' onclick='document.getElementById("fw-file").click()'>选择文件</button>
+<span class='file-name' id='fw-name'>未选择文件</span></div>
+<button class='btn btn-primary btn-block' id='ota-btn' onclick='startOTA()' disabled>上传固件</button>
+<div id='ota-msg'></div></div>
+<div class='card'><h2>系统信息</h2>
+<div class='info-grid'>
+<div class='info-item'><label>IP 地址</label><span id='info-ip'>-</span></div>
+<div class='info-item'><label>MAC 地址</label><span id='info-mac'>-</span></div>
+<div class='info-item'><label>设备名称</label><span id='info-name'>-</span></div>
+<div class='info-item'><label>空闲内存</label><span id='info-heap'>-</span></div>
+<div class='info-item'><label>固件版本</label><span id='info-fw'>-</span></div>
+<div class='info-item'><label>运行时间</label><span id='info-uptime'>-</span></div>
+<div class='info-item'><label>上次重启原因</label><span id='info-reset'>-</span></div>
+<div class='info-item'><label>WiFi 名称</label><span id='info-ssid'>-</span></div>
+<div class='info-item'><label>WiFi 信号</label><span id='info-rssi'>-</span></div>
+<div class='info-item'><label>WiFi 信道</label><span id='info-chan'>-</span></div>
+<div class='info-item'><label>WiFi 制式</label><span id='info-phy'>-</span></div>
+<div class='info-item' style='grid-column:1/-1'><label>WiFi BSSID</label><span id='info-bssid'>-</span></div>
+</div>
+<div class='actions'><button class='btn btn-danger' onclick='restart()'>重启设备</button></div>
+</div>
+<div class='card'><h2>系统日志</h2>
+<p style='color:#888;font-size:13px;margin-bottom:12px'>通过 WebSocket 实时查看 ESP 日志</p>
+<a href='/logs' class='btn btn-primary'>打开日志查看器</a></div>
+<div class='card'><h2>WiFi 测速</h2>
+<p style='color:#888;font-size:13px;margin-bottom:12px'>测量到本设备的网络延迟和吞吐量</p>
+<a href='/speedtest' class='btn btn-primary'>打开测速页面</a></div>
+</div>
+<script>
+function msg(id,txt,type){var e=document.getElementById(id);if(e){e.innerHTML='<div class="msg '+type+'">'+txt+'</div>';setTimeout(function(){e.innerHTML='';},4000);}}
+async function scanWiFi(){
+  var l=document.getElementById('wifi-list');l.innerHTML='<div class="msg info">正在扫描…</div>';
+  try{var r=await fetch('/api/wifi/scan');var d=await r.json();
+    if(d.success&&d.networks.length>0){l.innerHTML='';d.networks.forEach(function(n){
+      var i=document.createElement('div');i.className='wifi-item';
+      i.innerHTML='<span class="ssid">'+n.ssid+'</span><span class="rssi">'+n.rssi+' dBm</span>';
+      i.onclick=function(){document.querySelectorAll('.wifi-item').forEach(function(x){x.classList.remove('sel');});i.classList.add('sel');document.getElementById('wifi-ssid').value=n.ssid;};
+      l.appendChild(i);});}
+    else{l.innerHTML='<div class="msg info">未找到网络</div>';}}
+  catch(e){l.innerHTML='<div class="msg err">扫描失败</div>';}}
+async function saveWiFi(){
+  var s=document.getElementById('wifi-ssid').value.trim();var p=document.getElementById('wifi-pass').value;
+  if(!s){msg('wifi-msg','请输入网络名称','err');return;}
+  try{var r=await fetch('/api/wifi/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:s,password:p})});
+    var d=await r.json();if(d.success){msg('wifi-msg','已保存！正在重启…','ok');}else{msg('wifi-msg',d.error,'err');}}
+  catch(e){msg('wifi-msg','出错','err');}}
+async function loadBrightness(){
+  try{var r=await fetch('/api/led/brightness');var d=await r.json();
+    if(d.success){var s=document.getElementById('led-brightness');s.value=d.brightness;
+      document.getElementById('led-pct').textContent=Math.round(d.brightness/255*100)+'%';}}
+  catch(e){console.warn('无法加载 LED 亮度',e);}}
+async function saveBrightness(){
+  var v=Number.parseInt(document.getElementById('led-brightness').value,10);
+  try{var r=await fetch('/api/led/brightness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brightness:v})});
+    var d=await r.json();if(d.success){msg('brightness-msg','已保存！','ok');}else{msg('brightness-msg',d.error,'err');}}
+  catch(e){msg('brightness-msg','出错','err');console.error('saveBrightness failed',e);}}
+async function loadChannel(){
+  try{var r=await fetch('/api/audio/channel');var d=await r.json();
+    if(d.success){document.getElementById('chan-mode').value=String(d.mode);
+      chanLocked=!!d.locked;chanDsp=!!d.dsp;}}
+  catch(e){console.warn('无法加载声道模式',e);}
+  applyChanLabels();
+  applyAmpLayout();}
+var dualDevices=1;
+var dualPbtl=true;
+var dualLoaded=false;
+var airplayV1=false;
+var remoteLayoutEgg=false;
+var chanLocked=false;
+var chanDsp=false;
+/* 当 DSP 把两路输出交叉给同一个扬声器时没有立体声可言，此时选择的是喂入哪个输入声道。 */
+function applyChanLabels(){
+  document.getElementById('chan-label').textContent=
+    chanDsp?'输入声道':'输出声道';
+  var o=document.getElementById('chan-mode').options;
+  o[0].text=chanDsp?'双声道 (L+R)/2':'立体声';
+  o[3].text=chanDsp?'双声道 (L+R)/2':'单声道 (L+R)';
+}
+var DUAL_WARN={
+  1:'将第二功放桥接为单声道？\n\n它将被重新配置为 PBTL 单声道：其 OUT_A 和 OUT_B 端子必须桥接在一起并连接到单个扬声器。\n\n重启前请先重新接线。',
+  0:'取消第二功放的桥接？\n\n它将作为立体声 BTL 对运行，驱动两个独立扬声器。\n\n如果 OUT_A 和 OUT_B 仍为 PBTL 桥接状态，必须先拆开——保持短接会令两路输出互相驱动，可能损坏功放及其输出滤波器。'
+};
+/* 双功放时 DAC 配置已固定路由，逐输出的声道选择没有意义。 */
+function applyAmpLayout(){
+  document.getElementById('chan-group').style.display=
+    (chanLocked||dualDevices>1)?'none':'';
+}
+async function saveChannel(){
+  var v=Number.parseInt(document.getElementById('chan-mode').value,10);
+  try{var r=await fetch('/api/audio/channel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:v})});
+    var d=await r.json();if(d.success){msg('chan-msg','已保存！','ok');
+      /* 固件可能无论请求如何都保持立体声。 */
+      if(typeof d.mode==='number'){document.getElementById('chan-mode').value=String(d.mode);}
+      chanLocked=!!d.locked;applyAmpLayout();}
+    else{msg('chan-msg',d.error,'err');}}
+  catch(e){msg('chan-msg','出错','err');console.error('saveChannel failed',e);}}
+async function loadDual(){
+  try{var r=await fetch('/api/audio/dual');if(!r.ok)return;var d=await r.json();
+    if(d.success&&d.devices>1){dualDevices=d.devices;dualPbtl=!!d.pbtl;
+      document.getElementById('dual-mode').value=d.pbtl?'1':'0';
+      document.getElementById('dual-group').style.display='';
+      if(d.restart_required){msg('dual-msg','请重启以应用新的接线方式。','err');}}}
+  catch(e){console.warn('无法加载第二功放接线',e);}
+  applyAmpLayout();}
+async function saveDual(){
+  var sel=document.getElementById('dual-mode');
+  var v=Number.parseInt(sel.value,10);
+  var pbtl=v===1;
+  if(pbtl!==dualPbtl&&!confirm(DUAL_WARN[v])){sel.value=dualPbtl?'1':'0';return;}
+  try{var r=await fetch('/api/audio/dual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pbtl:pbtl})});
+    var d=await r.json();
+    if(d.success){dualPbtl=pbtl;msg('dual-msg','已保存！请重新接线，然后重启以生效。','ok');}
+    else{sel.value=dualPbtl?'1':'0';msg('dual-msg',d.error,'err');}}
+  catch(e){sel.value=dualPbtl?'1':'0';msg('dual-msg','出错','err');console.error('saveDual failed',e);}}
+async function loadAirplayMode(){
+  try{var r=await fetch('/api/airplay/mode');if(!r.ok)return;var d=await r.json();
+    if(d.success){airplayV1=!!d.v1;
+      document.getElementById('airplay-mode').value=d.v1?'1':'0';
+      if(d.restart_required){msg('airplay-msg','请重启以应用新模式。','err');}}}
+  catch(e){console.warn('无法加载 AirPlay 模式',e);}}
+async function saveAirplayMode(){
+  var sel=document.getElementById('airplay-mode');
+  var v1=sel.value==='1';
+  try{var r=await fetch('/api/airplay/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({v1:v1})});
+    var d=await r.json();
+    if(d.success){airplayV1=v1;msg('airplay-msg',d.restart_required?'已保存！请重启生效。':'已保存！','ok');}
+    else{sel.value=airplayV1?'1':'0';msg('airplay-msg',d.error,'err');}}
+  catch(e){sel.value=airplayV1?'1':'0';msg('airplay-msg','出错','err');console.error('saveAirplayMode failed',e);}}
+async function loadRemoteLayout(){
+  try{var r=await fetch('/api/remote/layout');if(!r.ok)return;var d=await r.json();
+    if(d.success){remoteLayoutEgg=!!d.egg;
+      document.getElementById('remote-layout').value=d.egg?'1':'0';}}
+  catch(e){console.warn('无法加载遥控布局',e);}}
+async function saveRemoteLayout(){
+  var sel=document.getElementById('remote-layout');
+  var egg=sel.value==='1';
+  try{var r=await fetch('/api/remote/layout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({egg:egg})});
+    var d=await r.json();
+    if(d.success){remoteLayoutEgg=egg;msg('remote-layout-msg','已保存，立即生效。','ok');}
+    else{sel.value=remoteLayoutEgg?'1':'0';msg('remote-layout-msg',d.error,'err');}}
+  catch(e){sel.value=remoteLayoutEgg?'1':'0';msg('remote-layout-msg','出错','err');console.error('saveRemoteLayout failed',e);}}
+async function saveName(){
+  var n=document.getElementById('dev-name').value.trim();if(!n){msg('name-msg','请输入名称','err');return;}
+  try{var r=await fetch('/api/device/name',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+    var d=await r.json();if(d.success){msg('name-msg','已保存！请重启生效。','ok');loadInfo();}else{msg('name-msg',d.error,'err');}}
+  catch(e){msg('name-msg','出错','err');}}
+async function startOTA(){
+  var f=document.getElementById('fw-file').files[0];if(!f){msg('ota-msg','请选择文件','err');return;}
+  document.getElementById('ota-btn').disabled=true;msg('ota-msg','正在上传…','info');
+  try{await fetch('/api/ota/update',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});msg('ota-msg','完成！正在重启…','ok');}
+  catch(e){msg('ota-msg','正在重启…','ok');}}
+async function restart(){
+  if(!confirm('确定要重启设备吗？'))return;
+  try{await fetch('/api/system/restart',{method:'POST'});msg('','正在重启…','info');}catch(e){}}
+async function loadInfo(){
+  try{var r=await fetch('/api/system/info');var d=await r.json();
+    if(d.success){var i=d.info;var b=document.getElementById('status-bar');
+      if(i.eth_connected){b.className='status-bar ok';b.innerHTML='以太网：'+i.ip;}
+      else if(i.wifi_connected){b.className='status-bar ok';b.innerHTML='WiFi：'+i.ip;}
+      else{b.className='status-bar err';b.innerHTML='未连接网络 — 请在下方配置 WiFi';}
+      document.getElementById('info-ip').textContent=i.ip||'-';
+      document.getElementById('info-mac').textContent=i.mac||'-';
+      document.getElementById('info-name').textContent=i.device_name||'-';
+      document.getElementById('info-heap').textContent=Math.round(i.free_heap/1024)+' KB';
+      document.getElementById('info-fw').textContent=i.firmware_version||'-';
+      function fmtUptime(s){if(s==null)return '-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+        return (d?d+'天 ':'')+(d||h?h+'小时 ':'')+m+'分 '+(s%60)+'秒';}
+      document.getElementById('info-uptime').textContent=fmtUptime(i.uptime_s);
+      document.getElementById('info-reset').textContent=i.reset_reason||'-';
+      function rssiLabel(r){if(r==null)return '-';var q='';if(r>=-55)q=' (优秀)';else if(r>=-65)q=' (良好)';else if(r>=-75)q=' (一般)';else q=' (较弱)';return r+' dBm'+q;}
+      document.getElementById('info-ssid').textContent=i.wifi_ssid||'-';
+      document.getElementById('info-rssi').textContent=rssiLabel(i.wifi_rssi);
+      document.getElementById('info-chan').textContent=i.wifi_channel||'-';
+      document.getElementById('info-phy').textContent=i.wifi_phy||'-';
+      document.getElementById('info-bssid').textContent=i.wifi_bssid||'-';
+      if(i.eq_supported||i.sub_supported){document.getElementById('eq-link').style.display='';}
+      if(i.hf1_supported||i.hf3_supported){document.getElementById('hf1-link').style.display='';}
+      /* 只有 TAS58xx 构建才注册 /api/audio/dual；主动请求会在设备端每次页面加载时记一条警告。 */
+      if(i.dual_supported&&!dualLoaded){dualLoaded=true;loadDual();}
+      document.getElementById('dev-name').placeholder=i.device_name||'';}}catch(e){}}
+async function loadUsbStatus(){
+  try{var r=await fetch('/api/audio/usb');var d=await r.json();
+    var bar=document.getElementById('usb-status-bar'),grid=document.getElementById('usb-grid');
+    if(!bar||!grid)return;
+    if(!d.success||!d.attached){
+      grid.style.display='none';bar.style.display='';
+      bar.className='msg info';
+      bar.innerHTML='未检测到 USB 声卡，请插入 USB 端口。';
+      if(typeof d.setup_stage==='number'&&d.setup_stage>0){
+        var stg=['无','打开设备','读取配置描述符','查找音频通路','申请接口','启动传输','切换通路','设置采样率','探测音量','完成'];
+        bar.innerHTML+='<br><span style="color:#f2b8ba;font-size:12px">配置阶段：'+
+          (stg[d.setup_stage]||('阶段'+d.setup_stage))+
+          '（错误码 '+(d.setup_err||0)+'）——设备枚举未完成</span>';
+      }
+      return;}
+    bar.style.display='none';grid.style.display='';
+    document.getElementById('usb-product').textContent=d.product||'(未命名设备)';
+    document.getElementById('usb-uac').textContent='UAC '+d.uac_version;
+    document.getElementById('usb-rate').textContent=d.sample_rate+' Hz';
+    document.getElementById('usb-bits').textContent=d.bits+'-bit';
+    document.getElementById('usb-ch').textContent=d.channels+' 声道';
+    var st=document.getElementById('usb-state');
+    st.textContent=d.streaming?'播放中':'空闲';
+    st.style.color=d.streaming?'#6fd89a':'#aaa';
+    var up=document.getElementById('usb-uptime');
+    if(up){up.textContent=Math.floor(d.uptime_s/60)+' 分 '+(d.uptime_s%60)+' 秒';}
+    var peak=document.getElementById('usb-peak');
+    if(peak){peak.textContent=(typeof d.peak_dbfs==='number'&&d.peak_dbfs>-90)
+      ?d.peak_dbfs.toFixed(1)+' dBFS':'无音频';
+      peak.style.color=(typeof d.peak_dbfs==='number'&&d.peak_dbfs>-1)?'#f2b8ba':'#e8eaed';}
+    var ap=document.getElementById('usb-ap-vol');
+    if(ap){ap.textContent=(typeof d.airplay_volume_db==='number')
+      ?d.airplay_volume_db.toFixed(1)+' dB':'-';}
+    var dv=document.getElementById('usb-dev-vol');
+    if(dv){dv.textContent=(typeof d.device_volume_db==='number')
+      ?d.device_volume_db.toFixed(1)+' dB':'-';}
+  }
+  catch(e){var bar=document.getElementById('usb-status-bar');if(bar){bar.className='msg err';bar.textContent='USB 状态不可用';}}}
+/* ── 音量 (dB -30..0 <-> 0..100%，数字增益，100%=0dB直通) ──────────────── */
+function volDbToPct(db){return Math.round((db+30)/30*100);}
+function volPctToDb(p){return Math.round((-30+30*p/100)*10)/10;}
+async function loadVolume(){
+  try{var r=await fetch('/api/audio/volume');var d=await r.json();
+    var s=document.getElementById('volume-slider');if(!s)return;
+    if(d.success){var p=Math.max(0,Math.min(100,volDbToPct(d.volume_db)));
+      s.value=p;document.getElementById('vol-pct').textContent=p+'%';}}
+  catch(e){console.warn('无法加载音量',e);}}
+async function saveVolume(){
+  var p=Number.parseInt(document.getElementById('volume-slider').value,10);
+  var db=volPctToDb(p);
+  try{var r=await fetch('/api/audio/volume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({volume_db:db})});
+    var d=await r.json();
+    var m=document.getElementById('volume-msg');if(!m)return;
+    m.innerHTML=d.success?'<div class="msg ok">设备音量已应用（'+db+' dB）</div>':'<div class="msg err">保存失败</div>';
+    setTimeout(function(){m.innerHTML='';},8000);}
+  catch(e){var m=document.getElementById('volume-msg');if(m){m.innerHTML='<div class="msg err">出错：'+e.message+'</div>';setTimeout(function(){m.innerHTML='';},8000);}}}
+window.onload=function(){
+  document.getElementById('fw-file').onchange=function(e){var f=e.target.files[0];
+    document.getElementById('fw-name').textContent=f?f.name:'未选择文件';
+    document.getElementById('ota-btn').disabled=!f;};
+  loadInfo();loadBrightness();loadChannel();loadAirplayMode();loadRemoteLayout();loadUsbStatus();loadVolume();
+  setInterval(loadInfo,30000);setInterval(loadUsbStatus,3000);};
+</script></body></html>
