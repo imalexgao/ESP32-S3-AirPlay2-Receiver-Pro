@@ -1466,7 +1466,7 @@ static void setup_device(uint8_t addr) {
     ESP_LOGE(TAG, "device_open(addr=%u) failed after retries: %s", addr,
              esp_err_to_name(oerr));
     s_setup_stage = 1;
-    s_setup_err = -1; /* generic: could not re-open after reprobe teardown */
+    s_setup_err = (int)oerr; /* real esp_err; positive value, e.g. 0x102 */
     return;
   }
   s_setup_stage = 2;
@@ -1768,29 +1768,64 @@ static void teardown_device(void) {
    * corrupts the heap. On DEV_GONE the stack fails transfers back much
    * faster — the extra wait just makes disconnect teardown unhurried. */
   vTaskDelay(pdMS_TO_TICKS(NUM_URBS * PACKETS_PER_URB + 10));
+  /* v1.1.3: usb_host_transfer_free() fails on an in-flight URB. A leaked
+   * in-flight URB makes interface_release() (endpoint busy) and then
+   * device_close() fail; device_close() then keeps the client's 'device
+   * opened' record set, so the next device_open() fails forever (reprobe
+   * stuck at 'enumeration incomplete'). Poll free until it succeeds instead
+   * of assuming the fixed wait above was enough. */
   for (int i = 0; i < NUM_URBS; i++) {
     if (s_urb[i]) {
-      usb_host_transfer_free(s_urb[i]);
+      for (int a = 0; a < 100; a++) { /* up to ~1 s */
+        if (usb_host_transfer_free(s_urb[i]) == ESP_OK)
+          break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
       s_urb[i] = NULL;
     }
   }
   for (int i = 0; i < NUM_IN_URBS; i++) {
     if (s_in_urb[i]) {
-      usb_host_transfer_free(s_in_urb[i]);
+      for (int a = 0; a < 100; a++) {
+        if (usb_host_transfer_free(s_in_urb[i]) == ESP_OK)
+          break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
       s_in_urb[i] = NULL;
     }
   }
   if (s_hid_urb) {
-    usb_host_transfer_free(s_hid_urb);
+    for (int a = 0; a < 100; a++) {
+      if (usb_host_transfer_free(s_hid_urb) == ESP_OK)
+        break;
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
     s_hid_urb = NULL;
   }
   if (s_dev) {
-    usb_host_interface_release(s_client, s_dev, s_out_iface);
-    if (s_in_ep)
-      usb_host_interface_release(s_client, s_dev, s_in_iface);
-    if (s_hid_iface != 0xff)
-      usb_host_interface_release(s_client, s_dev, s_hid_iface);
-    usb_host_device_close(s_client, s_dev);
+    esp_err_t e_rel = usb_host_interface_release(s_client, s_dev, s_out_iface);
+    if (e_rel != ESP_OK)
+      ESP_LOGE(TAG, "release out iface %u failed: %s", s_out_iface,
+               esp_err_to_name(e_rel));
+    if (s_in_ep) {
+      e_rel = usb_host_interface_release(s_client, s_dev, s_in_iface);
+      if (e_rel != ESP_OK)
+        ESP_LOGE(TAG, "release in iface %u failed: %s", s_in_iface,
+                 esp_err_to_name(e_rel));
+    }
+    if (s_hid_iface != 0xff) {
+      e_rel = usb_host_interface_release(s_client, s_dev, s_hid_iface);
+      if (e_rel != ESP_OK)
+        ESP_LOGE(TAG, "release hid iface %u failed: %s", s_hid_iface,
+                 esp_err_to_name(e_rel));
+    }
+    esp_err_t e_cls = usb_host_device_close(s_client, s_dev);
+    if (e_cls != ESP_OK) {
+      /* Keep the handle: s_dev stays set so a later open is not attempted
+       * against a client record that still marks this device as opened. */
+      ESP_LOGE(TAG, "device_close failed: %s — keeping handle", esp_err_to_name(e_cls));
+      return;
+    }
     s_dev = NULL;
   }
   s_in_ep = 0;
