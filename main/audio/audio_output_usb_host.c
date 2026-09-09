@@ -2167,9 +2167,14 @@ static void playback_task(void *arg) {
                                               MAX_RESAMPLE_FRAMES);
         play_buf = resample_buf;
       }
+      /* LED VU must track the SOURCE level, not the post-volume chain:
+       * v1.1's independent two-stage attenuation (phone x device) scales the
+       * PCM heavily, which drove the VU into silence at normal listening
+       * volumes (light stayed off while playing, blue while paused). Feed it
+       * BEFORE apply_volume(). */
+      led_audio_feed(play_buf, play_samples);
       apply_volume(play_buf, play_samples * 2);
       apply_channel_mode(play_buf, play_samples);
-      led_audio_feed(play_buf, play_samples);
       if (s_streaming) {
         if (s_frame_bytes == 4) {
           fifo_push((const uint8_t *)play_buf, play_samples * 4);
