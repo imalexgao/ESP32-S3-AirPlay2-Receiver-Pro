@@ -298,7 +298,7 @@ en:{
 }
 };
 function T(k){var d=LANG?I18N.en:I18N.zh;return d&&d[k]!=null?d[k]:k;}
-function fmt(s){var a=arguments;return s.replace(/\{(\w+)\}/g,function(m,k){return a[parseInt(k,10)+1]!=null?a[parseInt(k,10)+1]:m;});}
+function fmt(s,v){return s.replace(/\{(\w+)\}/g,function(m,k){return v&&v[k]!=null?v[k]:m;});}
 function applyI18n(){
   document.querySelectorAll('[data-i18n]').forEach(function(e){
     var k=e.getAttribute('data-i18n');e.textContent=T(k);});
@@ -443,7 +443,7 @@ function refreshFmtHint(){
   var h=document.getElementById('fmt-hint');if(!h)return;
   var idx=Number.parseInt(document.getElementById('audio-fmt').value,10);
   if(isNaN(idx)||!FMT_OPTS[idx])return;
-  h.textContent=fmt(T('fmt_hint_t'),FMT_OPTS[idx].label+' — '+T('fmtq'+idx));
+  h.textContent=fmt(T('fmt_hint_t'),{q:FMT_OPTS[idx].label+' — '+T('fmtq'+idx)});
 }
 async function saveFormat(){
   var v=Number.parseInt(document.getElementById('audio-fmt').value,10);
@@ -489,8 +489,8 @@ async function restart(){
 async function loadInfo(){
   try{var r=await fetch('/api/system/info');var d=await r.json();
     if(d.success){var i=d.info;var b=document.getElementById('status-bar');
-      if(i.eth_connected){b.className='status-bar ok';b.innerHTML=fmt(T('eth'),i.ip);}
-      else if(i.wifi_connected){b.className='status-bar ok';b.innerHTML=fmt(T('wifi'),i.ip);}
+      if(i.eth_connected){b.className='status-bar ok';b.innerHTML=fmt(T('eth'),{ip:i.ip});}
+      else if(i.wifi_connected){b.className='status-bar ok';b.innerHTML=fmt(T('wifi'),{ip:i.ip});}
       else{b.className='status-bar err';b.innerHTML=T('no_net');}
       document.getElementById('info-ip').textContent=i.ip||'-';
       document.getElementById('info-mac').textContent=i.mac||'-';
@@ -525,7 +525,7 @@ async function loadUsbStatus(){
         var stg=[T('stg_none'),T('usb_stage')+'1',T('usb_stage')+'2',T('usb_stage')+'3',T('usb_stage')+'4',T('usb_stage')+'5',T('usb_stage')+'6',T('usb_stage')+'7',T('usb_stage')+'8',T('usb_stage')+'9'];
         bar.innerHTML+='<br><span style="color:#f2b8ba;font-size:12px">'+T('usb_stage')+':'+
           (stg[d.setup_stage]||('#'+d.setup_stage))+
-          fmt(T('usb_stage_err'),(d.setup_err||0))+'</span>';
+          fmt(T('usb_stage_err'),{e:(d.setup_err||0)})+'</span>';
       }
       return;}
     bar.style.display='none';grid.style.display='';
@@ -569,9 +569,9 @@ async function saveVolume(){
   try{var r=await fetch('/api/audio/volume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({volume_db:db})});
     var d=await r.json();
     var m=document.getElementById('volume-msg');if(!m)return;
-    m.innerHTML=d.success?'<div class="msg ok">'+fmt(T('vol_applied'),db)+'</div>':'<div class="msg err">'+T('vol_fail')+'</div>';
+    m.innerHTML=d.success?'<div class="msg ok">'+fmt(T('vol_applied'),{db:db})+'</div>':'<div class="msg err">'+T('vol_fail')+'</div>';
     setTimeout(function(){m.innerHTML='';},8000);}
-  catch(e){var m=document.getElementById('volume-msg');if(m){m.innerHTML='<div class="msg err">'+fmt(T('vol_save_err'),e.message)+'</div>';setTimeout(function(){m.innerHTML='';},8000);}}}
+  catch(e){var m=document.getElementById('volume-msg');if(m){m.innerHTML='<div class="msg err">'+fmt(T('vol_save_err'),{e:e.message})+'</div>';setTimeout(function(){m.innerHTML='';},8000);}}}
 
 window.onload=function(){
   document.getElementById('fw-file').onchange=function(e){var f=e.target.files[0];
