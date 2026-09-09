@@ -297,7 +297,7 @@ en:{
  fmt_hint_t:'Current: {q}. 48kHz/24bit is the loudest on Windows-class cards. 44.1kHz can be quiet on some cards.'
 }
 };
-function T(k){var d=I18N[LANG?1:0];return d&&d[k]!=null?d[k]:k;}
+function T(k){var d=LANG?I18N.en:I18N.zh;return d&&d[k]!=null?d[k]:k;}
 function fmt(s){var a=arguments;return s.replace(/\{(\w+)\}/g,function(m,k){return a[parseInt(k,10)+1]!=null?a[parseInt(k,10)+1]:m;});}
 function applyI18n(){
   document.querySelectorAll('[data-i18n]').forEach(function(e){
