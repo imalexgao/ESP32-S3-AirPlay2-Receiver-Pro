@@ -11,6 +11,7 @@ static const char *TAG = "settings";
 
 #define NVS_NAMESPACE  "airplay"
 #define NVS_KEY_VOLUME "volume_db"
+#define NVS_KEY_AIRPLAY_VOL "ap_vol"
 #ifdef CONFIG_BT_A2DP_ENABLE
 #define NVS_KEY_BT_VOLUME "bt_vol"
 #endif
@@ -39,6 +40,11 @@ static const char *TAG = "settings";
 static float g_volume_db = -15.0f;
 static bool g_volume_loaded = false;
 
+/* AirPlay source volume (phone remote volume), independent from device volume. */
+static float g_airplay_vol_db = 0.0f; /* 0 dB = full */
+static bool g_airplay_vol_loaded = false;
+static bool g_airplay_vol_dirty = false;
+
 #ifdef CONFIG_BT_A2DP_ENABLE
 static uint8_t g_bt_volume = 64; /* default: 50 % */
 static bool g_bt_volume_loaded = false;
@@ -65,6 +71,14 @@ esp_err_t settings_init(void) {
       g_volume_db = (float)vol_fixed / 100.0f;
       g_volume_loaded = true;
       ESP_LOGI(TAG, "Loaded volume: %.2f dB", g_volume_db);
+    }
+
+    int32_t ap_vol_fixed = 0;
+    if (nvs_get_i32(nvs, NVS_KEY_AIRPLAY_VOL, &ap_vol_fixed) == ESP_OK) {
+      g_airplay_vol_db = (float)ap_vol_fixed / 100.0f;
+      g_airplay_vol_loaded = true;
+      g_airplay_vol_dirty = false;
+      ESP_LOGI(TAG, "Loaded AirPlay volume: %.2f dB", g_airplay_vol_db);
     }
 
     uint8_t airplay_v1;
@@ -169,6 +183,56 @@ esp_err_t settings_persist_volume(void) {
     ESP_LOGI(TAG, "Persisted volume: %.2f dB", g_volume_db);
   } else {
     ESP_LOGE(TAG, "Failed to persist volume: %s", esp_err_to_name(err));
+  }
+
+  return err;
+}
+
+esp_err_t settings_get_airplay_volume(float *volume_db) {
+  if (!volume_db) {
+    return ESP_ERR_INVALID_ARG;
+  }
+  if (!g_airplay_vol_loaded) {
+    *volume_db = 0.0f;
+    return ESP_ERR_NOT_FOUND;
+  }
+  *volume_db = g_airplay_vol_db;
+  return ESP_OK;
+}
+
+esp_err_t settings_set_airplay_volume(float volume_db) {
+  g_airplay_vol_db = volume_db;
+  g_airplay_vol_loaded = true;
+  g_airplay_vol_dirty = true;
+  return ESP_OK;
+}
+
+esp_err_t settings_persist_airplay_volume(void) {
+  if (!g_airplay_vol_loaded || !g_airplay_vol_dirty) {
+    return ESP_OK;
+  }
+
+  nvs_handle_t nvs;
+  esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to open NVS (airplay vol): %s", esp_err_to_name(err));
+    return err;
+  }
+
+  int32_t ap_vol_fixed = (int32_t)(g_airplay_vol_db * 100.0f);
+  err = nvs_set_i32(nvs, NVS_KEY_AIRPLAY_VOL, ap_vol_fixed);
+  if (err == ESP_OK) {
+    err = nvs_commit(nvs);
+  }
+
+  nvs_close(nvs);
+
+  if (err == ESP_OK) {
+    g_airplay_vol_dirty = false;
+    ESP_LOGI(TAG, "Persisted AirPlay volume: %.2f dB", g_airplay_vol_db);
+  } else {
+    ESP_LOGE(TAG, "Failed to persist AirPlay volume: %s",
+             esp_err_to_name(err));
   }
 
   return err;

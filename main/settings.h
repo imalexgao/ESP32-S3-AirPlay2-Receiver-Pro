@@ -34,6 +34,25 @@ esp_err_t settings_set_volume(float volume_db);
  */
 esp_err_t settings_persist_volume(void);
 
+/**
+ * Get saved AirPlay source volume in dB (0 = max, -30 = mute).
+ * Independent from the device volume stored by settings_get_volume().
+ * @return ESP_OK if found, ESP_ERR_NOT_FOUND if never stored
+ */
+esp_err_t settings_get_airplay_volume(float *volume_db);
+
+/**
+ * Update cached AirPlay source volume (does NOT write to NVS).
+ * @param volume_db Volume in dB (0 = max, -30 = mute)
+ */
+esp_err_t settings_set_airplay_volume(float volume_db);
+
+/**
+ * Persist the cached AirPlay source volume to NVS.
+ * Call once at session disconnect rather than on every change.
+ */
+esp_err_t settings_persist_airplay_volume(void);
+
 #ifdef CONFIG_BT_A2DP_ENABLE
 /**
  * Get saved Bluetooth volume (AVRC 0-127 scale).

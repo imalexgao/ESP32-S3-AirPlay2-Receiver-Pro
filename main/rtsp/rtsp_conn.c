@@ -5,8 +5,11 @@
 #include <unistd.h>
 
 #include "audio_receiver.h"
+#include "esp_log.h"
 #include "ptp_clock.h"
 #include "settings.h"
+
+static const char *TAG = "rtsp_conn";
 
 rtsp_conn_t *rtsp_conn_create(void) {
   rtsp_conn_t *conn = calloc(1, sizeof(rtsp_conn_t));
@@ -19,8 +22,24 @@ rtsp_conn_t *rtsp_conn_create(void) {
    * deliberately independent from the device volume (settings): the phone
    * volume must NOT move the web slider and must NOT overwrite the persisted
    * device volume. See rtsp_conn_set_volume(). */
-  conn->volume_db = 0.0f; /* 0 dB = full */
-  conn->volume_q15 = 32768;
+  /* Restore the last AirPlay source volume (0 dB = full) so the phone's
+   * remote volume bar starts where the user left it, instead of always at
+   * 100 %. Falls back to full volume when nothing has been stored yet. */
+  float ap_vol = 0.0f;
+  if (settings_get_airplay_volume(&ap_vol) == ESP_OK) {
+    conn->volume_db = ap_vol;
+    conn->volume_q15 = 32768;
+    if (ap_vol <= -30.0f) {
+      conn->volume_q15 = 0;
+    } else if (ap_vol < 0.0f) {
+      float normalized = (ap_vol + 30.0f) / 30.0f;
+      conn->volume_q15 = (int32_t)((normalized * normalized) * 32768.0f);
+    }
+    ESP_LOGI(TAG, "Restored AirPlay volume: %.2f dB", ap_vol);
+  } else {
+    conn->volume_db = 0.0f; /* 0 dB = full */
+    conn->volume_q15 = 32768;
+  }
 
   conn->data_socket = -1;
   conn->control_socket = -1;
@@ -34,10 +53,9 @@ void rtsp_conn_free(rtsp_conn_t *conn) {
     return;
   }
 
-  /* The device volume (web slider / buttons) is persisted by its own setters
-   * (playback_control_set_volume / settings_persist_volume). The phone volume
-   * is session-scoped and must not be persisted here — it would overwrite the
-   * user's device volume with the source's last volume. */
+  /* Persist the AirPlay source volume for the next session. It uses its own
+   * NVS key, so the device volume (web slider / buttons) is never touched. */
+  settings_persist_airplay_volume();
 
   // Cleanup any resources
   rtsp_conn_cleanup(conn);
@@ -123,9 +141,10 @@ void rtsp_conn_set_volume(rtsp_conn_t *conn, float volume_db) {
     conn->volume_q15 = (int32_t)(curved * 32768.0f);
   }
 
-  /* NOTE: the AirPlay/source volume is deliberately NOT written to settings —
-   * settings now holds the independent DEVICE volume (web slider / buttons),
-   * and the source's volume must not move or overwrite it. */
+  /* Remember the source volume for the next session so the phone remote
+   * volume bar resumes at the last value. This is a separate NVS key from
+   * the DEVICE volume (web slider / buttons) - they stay independent. */
+  settings_set_airplay_volume(volume_db);
 }
 
 int32_t rtsp_conn_get_volume_q15(rtsp_conn_t *conn) {
